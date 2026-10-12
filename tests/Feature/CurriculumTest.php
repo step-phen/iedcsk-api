@@ -366,8 +366,8 @@ class CurriculumTest extends TestCase
         $week = $this->actingAs($tina)->getJson('/api/modules/'.DB::table('module_domains')->value('module_id').'/lessons?quarter=1&week=1')->json('0.activities');
         $this->assertSame(['Hop on one foot', 'Jump'], array_column($week, 'activityName'));
 
-        // Every field is required, and the video must really be a video.
-        $post([])->assertJsonValidationErrors(['name', 'description', 'instructions', 'teacherGuidelines', 'video']);
+        // Every text field is required, the video is optional, and a sent video must really be a video.
+        $post([])->assertJsonValidationErrors(['name', 'description', 'instructions', 'teacherGuidelines'])->assertJsonMissingValidationErrors('video');
         $post($payload + ['video' => UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf')])->assertJsonValidationErrors('video');
         $post($payload + ['video' => $video()], 99999)->assertNotFound();
 
