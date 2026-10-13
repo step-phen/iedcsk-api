@@ -17,6 +17,16 @@ class TrustedProxyTest extends TestCase
             ->assertSeeText('https://');
     }
 
+    public function test_visitor_supplied_forwarded_host_is_ignored(): void
+    {
+        Route::get('/_proxy-check', fn () => asset('storage/x.mp4'));
+
+        $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
+            ->withHeaders(['X-Forwarded-Host' => 'evil.example', 'X-Forwarded-Proto' => 'https'])
+            ->get('/_proxy-check')
+            ->assertDontSeeText('evil.example');
+    }
+
     public function test_outside_clients_cannot_fake_https(): void
     {
         Route::get('/_proxy-check', fn () => asset('storage/x.mp4'));
