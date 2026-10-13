@@ -299,6 +299,27 @@ class SchoolYearTest extends TestCase
         $this->assertSame($current->id, DB::table('learner_school_years')->where('learner_id', $learner)->value('school_year_id'));
     }
 
+    public function test_first_school_year_is_set_up_in_settings_after_a_fresh_seed(): void
+    {
+        $server = $_SERVER;
+        try {
+            $_SERVER = ['SEED_TEACHER_USERNAME' => 'Tina', 'SEED_TEACHER_PASSWORD' => 'secret-pass', 'SEED_TEACHER_NAME' => 'Tina'] + $_SERVER;
+            $this->seed();
+        } finally {
+            $_SERVER = $server;
+        }
+
+        // Seeding creates the teacher but no school year; the teacher adds and activates it in Settings.
+        $tina = Teacher::where('username', 'tina')->firstOrFail();
+        $this->assertSame(0, SchoolYear::count());
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertContent('null');
+
+        $id = $this->actingAs($tina)->postJson('/api/school-years', ['name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15'])
+            ->assertCreated()->assertJson(['status' => 'upcoming'])->json('schoolYearId');
+        $this->actingAs($tina)->patchJson("/api/school-years/{$id}/activate")->assertOk()->assertJson(['status' => 'active']);
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['schoolYearId' => $id, 'name' => '2026-2027']);
+    }
+
     public function test_creates_and_lists_school_years(): void
     {
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
