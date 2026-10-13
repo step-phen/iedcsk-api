@@ -95,9 +95,15 @@ class ClassroomRecordController extends Controller
             ->join('learner_activity_assignments', 'learner_activity_assignments.id', '=', 'learner_activity_attempts.assignment_id')
             ->whereIn('learner_activity_assignments.enrollment_id', $enrollmentIds)
             ->whereIn('learner_activity_assignments.activity_id', $activityIds)
+            ->join('quarters', 'quarters.id', '=', 'learner_activity_assignments.quarter_id')
             ->whereIn('learner_activity_attempts.status', ['evaluated', 'submitted'])
             ->orderByRaw('coalesce(learner_activity_attempts.evaluated_at, learner_activity_attempts.submitted_at) desc')
-            ->get(['learner_activity_assignments.enrollment_id', 'learner_activity_assignments.activity_id', 'learner_activity_attempts.score', 'learner_activity_attempts.max_score', 'learner_activity_attempts.practical_rating'])
+            ->get([
+                'learner_activity_assignments.enrollment_id', 'learner_activity_assignments.activity_id', 'learner_activity_attempts.score', 'learner_activity_attempts.max_score', 'learner_activity_attempts.practical_rating',
+                // Extra detail the progress report keeps as evidence: which try, the teacher's note, and the quarter it was played in.
+                'learner_activity_attempts.id as attempt_id', 'learner_activity_attempts.remarks', 'quarters.quarter_number as played_quarter',
+                DB::raw('coalesce(learner_activity_attempts.evaluated_at, learner_activity_attempts.submitted_at) as finished_at'),
+            ])
             ->unique(fn ($r) => $r->enrollment_id.'-'.$r->activity_id)
             ->values();
     }
