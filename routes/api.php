@@ -8,6 +8,7 @@ use App\Http\Controllers\HandoverController;
 use App\Http\Controllers\LearnerController;
 use App\Http\Controllers\LearnerSessionController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\ProgressReportController;
 use App\Http\Controllers\QuarterController;
 use App\Http\Controllers\SchoolYearController;
 use App\Http\Controllers\SectionController;
@@ -55,6 +56,14 @@ Route::middleware(['auth:sanctum', EnsureTeacherCanWork::class])->group(function
     Route::put('/sections/{section}/classroom/practical-rating', [ClassroomController::class, 'practicalRating'])->whereNumber('section');
     Route::put('/sections/{section}/attendance', [ClassroomController::class, 'attendance'])->whereNumber('section');
     Route::get('/sections/{section}/classroom-record', [ClassroomRecordController::class, 'show'])->whereNumber('section');
+    Route::get('/sections/{section}/progress-reports', [ProgressReportController::class, 'index'])->whereNumber('section');
+    Route::post('/sections/{section}/progress-reports', [ProgressReportController::class, 'store'])->whereNumber('section');
+    Route::get('/progress-reports/{report}', [ProgressReportController::class, 'show'])->whereNumber('report');
+    Route::put('/progress-reports/{report}', [ProgressReportController::class, 'update'])->whereNumber('report');
+    Route::post('/progress-reports/{report}/regenerate', [ProgressReportController::class, 'regenerate'])->whereNumber('report');
+    Route::post('/progress-reports/{report}/finalize', [ProgressReportController::class, 'finalize'])->whereNumber('report');
+    Route::post('/progress-reports/{report}/reopen', [ProgressReportController::class, 'reopen'])->whereNumber('report');
+    Route::get('/progress-reports/{report}/versions/{version}', [ProgressReportController::class, 'version'])->whereNumber(['report', 'version']);
 
     Route::get('/provinces', fn () => Province::orderBy('province_name')->get()
         ->map(fn (Province $p) => ['provinceId' => $p->id, 'provinceName' => $p->province_name]));

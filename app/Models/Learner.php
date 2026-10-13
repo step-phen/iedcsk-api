@@ -71,6 +71,8 @@ class Learner extends Model
 
         return $this->toListArray() + [
             'schoolYear' => $enrollment?->schoolYear?->name,
+            // Lets the profile link to this learner's progress report in the right section.
+            'sectionId' => $enrollment?->section_id,
             'address' => $address ? [
                 'addressId' => $address->id,
                 'learnerId' => $this->id,
