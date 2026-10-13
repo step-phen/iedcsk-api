@@ -10,6 +10,13 @@ class TeacherSeeder extends Seeder
 {
     public function run(): void
     {
+        // First-time setup only: once any teacher exists, accounts change only in the app and through handovers.
+        if (Teacher::exists()) {
+            $this->command?->info('Skipped teacher: an account already exists.');
+
+            return;
+        }
+
         // Credentials come from .env so no password is committed to the repo.
         $username = env('SEED_TEACHER_USERNAME');
         $password = env('SEED_TEACHER_PASSWORD');
@@ -19,10 +26,6 @@ class TeacherSeeder extends Seeder
             throw new RuntimeException('Set SEED_TEACHER_USERNAME, SEED_TEACHER_PASSWORD and SEED_TEACHER_NAME in .env before seeding.');
         }
 
-        // Re-running updates the same account instead of failing on the unique username.
-        Teacher::updateOrCreate(
-            ['username' => strtolower($username)],
-            ['name' => $name, 'password_hash' => $password],
-        );
+        Teacher::create(['username' => strtolower($username), 'name' => $name, 'password_hash' => $password]);
     }
 }
