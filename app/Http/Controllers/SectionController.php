@@ -262,14 +262,17 @@ class SectionController extends Controller
             ->first();
 
         // No active quarter means nothing counts as "this quarter's" lesson yet.
+        // Module code and domain name let the dashboard tell MAPEH's three domains apart.
         $lessons = $quarter ? DB::table('lessons')
             ->join('module_domains', 'module_domains.id', '=', 'lessons.module_domain_id')
+            ->join('modules', 'modules.id', '=', 'module_domains.module_id')
+            ->join('developmental_domains', 'developmental_domains.id', '=', 'module_domains.domain_id')
             ->whereIn('module_domains.module_id', $sectionModules->pluck('module_id'))
             ->where('lessons.is_active', true)
             ->where('lessons.day_of_week', $today)
             ->where('lessons.quarter_number', $quarter->quarter_number)
             ->orderBy('lessons.sequence_order')
-            ->get(['lessons.id', 'lessons.title', 'lessons.week_number', 'module_domains.module_id']) : collect();
+            ->get(['lessons.id', 'lessons.title', 'lessons.week_number', 'module_domains.module_id', 'modules.code as module_code', 'developmental_domains.name as domain_name']) : collect();
 
         $activities = DB::table('activities')
             ->whereIn('lesson_id', $lessons->pluck('id'))
@@ -285,6 +288,8 @@ class SectionController extends Controller
                 'week' => $l->week_number,
                 'moduleId' => $l->module_id,
                 'moduleName' => $moduleNameByModule[$l->module_id] ?? null,
+                'moduleCode' => $l->module_code,
+                'domainName' => $l->domain_name,
                 'activities' => ($activities[$l->id] ?? collect())->map(fn ($a) => [
                     'activityId' => $a->id,
                     'activityName' => $a->name,

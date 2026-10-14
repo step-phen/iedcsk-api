@@ -258,12 +258,55 @@ class SectionTest extends TestCase
             ->assertJsonCount(1, 'lessons')
             ->assertJsonPath('lessons.0.lessonName', 'Letter A')
             ->assertJsonPath('lessons.0.moduleName', 'Reading')
+            ->assertJsonPath('lessons.0.moduleCode', 'reading')
+            ->assertJsonPath('lessons.0.domainName', 'Reading and Language Development')
             ->assertJsonPath('lessons.0.week', 2)
             ->assertJsonPath('lessons.0.activities.0.activityName', 'Trace A');
 
         // Another teacher's section is a 404, never someone else's schedule.
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
         $this->actingAs($omar)->getJson("/api/sections/{$sectionId}/todays-schedule")->assertNotFound();
+    }
+
+    public function test_todays_schedule_names_each_mapeh_lessons_domain(): void
+    {
+        // A known Tuesday, when the default timetable runs MAPEH.
+        Carbon::setTestNow(Carbon::parse('2026-06-09 09:00:00', 'Asia/Manila'));
+
+        $this->seed(CurriculumSeeder::class);
+        $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
+        DB::table('quarters')->insert([
+            'school_year_id' => $year->id, 'quarter_number' => 1, 'name' => '1st Quarter',
+            'start_date' => '2026-06-01', 'end_date' => '2026-08-31', 'status' => 'active',
+        ]);
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        $sectionId = $this->actingAs($tina)
+            ->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])
+            ->json('sectionId');
+
+        $domainIds = DB::table('module_domains')
+            ->join('modules', 'modules.id', '=', 'module_domains.module_id')
+            ->join('developmental_domains', 'developmental_domains.id', '=', 'module_domains.domain_id')
+            ->where('modules.code', 'mapeh')
+            ->pluck('module_domains.id', 'developmental_domains.code');
+        // Inserted out of sequence so the response order can only come from sequence_order.
+        foreach (['health_habits' => 3, 'gross_motor' => 1, 'arts_crafts' => 2] as $code => $order) {
+            DB::table('lessons')->insert([
+                'module_domain_id' => $domainIds[$code], 'title' => "Lesson {$order}", 'sequence_order' => $order,
+                'day_of_week' => 2, 'quarter_number' => 1, 'week_number' => 2,
+            ]);
+        }
+
+        $lessons = $this->actingAs($tina)->getJson("/api/sections/{$sectionId}/todays-schedule")->assertOk()->json('lessons');
+
+        $this->assertSame(
+            [
+                ['Lesson 1', 'MAPEH', 'mapeh', 'Gross Motor Development'],
+                ['Lesson 2', 'MAPEH', 'mapeh', 'Arts and Crafts'],
+                ['Lesson 3', 'MAPEH', 'mapeh', 'Health, Works, Habits and Attitude'],
+            ],
+            array_map(fn ($l) => [$l['lessonName'], $l['moduleName'], $l['moduleCode'], $l['domainName']], $lessons),
+        );
     }
 
     public function test_teacher_edits_a_sections_schedule_keeping_history(): void
