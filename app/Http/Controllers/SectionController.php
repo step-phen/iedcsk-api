@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
 use Illuminate\Container\Attributes\CurrentUser;
@@ -15,32 +14,17 @@ use Illuminate\Validation\ValidationException;
 
 class SectionController extends Controller
 {
-    private const GRADE_LEVELS = ['Kindergarten'];
-
-    // Default Kindergarten timetables per session: module code => [start, end, ISO weekdays].
-    private const TIMETABLES = [
-        'morning' => [
-            'reading' => ['08:00', '09:00', [1, 3, 5]],
-            'language' => ['09:15', '10:00', [1, 3, 5]],
-            'writing' => ['10:00', '11:15', [1, 3, 5]],
-            'mapeh' => ['08:00', '09:30', [2, 4]],
-            'math' => ['09:45', '11:15', [2, 4]],
-        ],
-        'afternoon' => [
-            'reading' => ['13:00', '14:00', [1, 3, 5]],
-            'language' => ['14:15', '15:00', [1, 3, 5]],
-            'writing' => ['15:00', '16:15', [1, 3, 5]],
-            'mapeh' => ['13:00', '14:30', [2, 4]],
-            'math' => ['14:45', '16:15', [2, 4]],
-        ],
-    ];
-
     public function index(#[CurrentUser] Teacher $teacher): JsonResponse
     {
+        // Read-only: sections are created only when a school year is activated (Section::setUp).
+        // Joy, then Faith, then any section from before the fixed choices; the first is the default.
+        $order = array_flip(array_keys(Section::CHOICES));
         $sections = $teacher->sections()
             ->whereHas('schoolYear', fn ($q) => $q->where('status', 'active'))
-            ->orderBy('id') // Creation order, so the first section made is the default.
-            ->get();
+            ->orderBy('id')
+            ->get()
+            ->sortBy(fn (Section $s) => $order[Section::choice($s->name) ?? ''] ?? count($order))
+            ->values();
 
         return response()->json($sections->map(fn (Section $s) => $s->toApiArray()));
     }
@@ -326,64 +310,5 @@ class SectionController extends Controller
             ->count();
 
         return response()->json(['lessonCount' => $lessonCount, 'activityCount' => $activityCount]);
-    }
-
-    public function store(Request $request, #[CurrentUser] Teacher $teacher): JsonResponse
-    {
-        $year = SchoolYear::active();
-        if (! $year) {
-            throw ValidationException::withMessages(['sectionName' => 'There is no active school year yet.']);
-        }
-
-        $data = $request->validate([
-            'gradeLevel' => ['required', Rule::in(self::GRADE_LEVELS)],
-            'session' => ['sometimes', Rule::in(array_keys(self::TIMETABLES))],
-            'sectionName' => [
-                'required', 'string', 'max:100',
-                Rule::unique('sections', 'name')
-                    ->where('school_year_id', $year->id)
-                    ->where('grade_level', $request->input('gradeLevel')),
-            ],
-        ], ['sectionName.unique' => 'A section with this name already exists this school year.']);
-
-        // A section is created with all of its grade's modules and its session's default timetable.
-        $timetable = self::TIMETABLES[$data['session'] ?? 'morning'];
-        $section = DB::transaction(function () use ($data, $teacher, $year, $timetable) {
-            $section = Section::create([
-                'school_year_id' => $year->id,
-                'teacher_id' => $teacher->id,
-                'name' => trim($data['sectionName']),
-                'grade_level' => $data['gradeLevel'],
-            ]);
-
-            $modules = DB::table('modules')->where(['grade_level' => $data['gradeLevel'], 'is_active' => true])->get();
-            foreach ($modules as $module) {
-                $sectionModuleId = DB::table('section_modules')->insertGetId([
-                    'section_id' => $section->id,
-                    'module_id' => $module->id,
-                    'teacher_id' => $teacher->id,
-                ]);
-
-                if (! isset($timetable[$module->code])) {
-                    continue;
-                }
-                [$start, $end, $days] = $timetable[$module->code];
-                $scheduleId = DB::table('class_schedules')->insertGetId([
-                    'section_module_id' => $sectionModuleId,
-                    'start_time' => $start,
-                    'end_time' => $end,
-                    'effective_from' => $year->start_date,
-                    'effective_until' => $year->end_date,
-                ]);
-                DB::table('schedule_days')->insert(array_map(
-                    fn (int $day) => ['schedule_id' => $scheduleId, 'day_of_week' => $day],
-                    $days,
-                ));
-            }
-
-            return $section;
-        });
-
-        return response()->json($section->toApiArray(), 201);
     }
 }

@@ -22,6 +22,9 @@ class SchoolYearTest extends TestCase
         parent::tearDown();
     }
 
+    // Activation payload for a year that has no sections yet.
+    private const BOTH = ['sections' => ['Joy', 'Faith']];
+
     private function teacher(): Teacher
     {
         return Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
@@ -45,7 +48,7 @@ class SchoolYearTest extends TestCase
         $this->patchJson("/api/school-years/{$next->id}/activate")->assertUnauthorized();
         $this->actingAs($tina)->patchJson('/api/school-years/999/activate')->assertNotFound();
 
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)
             ->assertOk()->assertJson(['schoolYearId' => $next->id, 'status' => 'active']);
 
         // The old year hasn't ended yet, so it goes back to upcoming.
@@ -61,12 +64,12 @@ class SchoolYearTest extends TestCase
 
         // Ends today (Apr 15) in Manila: not past yet.
         Carbon::setTestNow(Carbon::parse('2027-04-15 23:30', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
         $this->assertSame('upcoming', $current->refresh()->status);
 
         // 00:30 Apr 16 in Manila is still Apr 15 in UTC, so this only passes when Manila's date is used.
         Carbon::setTestNow(Carbon::parse('2027-04-16 00:30', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", self::BOTH)->assertOk();
         $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
         $this->assertSame('completed', $current->refresh()->status);
         $this->assertSame('active', $next->refresh()->status);
@@ -91,7 +94,7 @@ class SchoolYearTest extends TestCase
         $this->quarter($next, 1, '2027-06-14', '2027-08-31');
 
         Carbon::setTestNow(Carbon::parse('2027-04-20 10:00', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
 
         $this->assertSame('completed', $current->refresh()->status);
         $this->assertSame([4 => 'completed'], $this->quarterStatuses($current));
@@ -102,6 +105,16 @@ class SchoolYearTest extends TestCase
         $this->assertSame(0, Quarter::where('status', 'active')->count());
     }
 
+    public function test_active_year_includes_its_active_quarter(): void
+    {
+        $tina = $this->teacher();
+        [$current] = $this->twoYears();
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['activeQuarter' => null]);
+
+        $this->quarter($current, 1, '2026-06-15', '2026-09-25', 'active');
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['activeQuarter' => '1st Quarter']);
+    }
+
     public function test_switching_years_returns_an_unfinished_quarter_to_upcoming(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-28 10:00', 'Asia/Manila'));
@@ -110,7 +123,7 @@ class SchoolYearTest extends TestCase
         $this->quarter($current, 1, '2026-06-15', '2026-09-25', 'completed');
         $this->quarter($current, 2, '2026-09-28', '2026-11-13', 'active');
 
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
 
         $this->assertSame('upcoming', $current->refresh()->status);
         $this->assertSame([1 => 'completed', 2 => 'upcoming'], $this->quarterStatuses($current));
@@ -125,12 +138,12 @@ class SchoolYearTest extends TestCase
 
         // Still Sep 25 in Manila: the quarter's last day.
         Carbon::setTestNow(Carbon::parse('2026-09-25 23:30', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
         $this->assertSame([1 => 'upcoming'], $this->quarterStatuses($current));
 
         // Sep 26 in Manila, though still Sep 25 in UTC.
         Carbon::setTestNow(Carbon::parse('2026-09-26 00:30', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", self::BOTH)->assertOk();
         $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/quarters/1/activate")->assertOk();
         $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
         $this->assertSame([1 => 'completed'], $this->quarterStatuses($current));
@@ -143,7 +156,7 @@ class SchoolYearTest extends TestCase
         [$current, $next] = $this->twoYears();
         $this->quarter($current, 1, '2026-06-15', '2026-09-25');
 
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk()->assertJson(['status' => 'active']);
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk()->assertJson(['status' => 'active']);
 
         $this->assertSame('upcoming', $current->refresh()->status);
         $this->assertSame([1 => 'upcoming'], $this->quarterStatuses($current));
@@ -158,7 +171,7 @@ class SchoolYearTest extends TestCase
         // Left active by data from before this rule existed.
         $this->quarter($next, 1, '2027-06-14', '2027-08-31', 'active');
 
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
 
         $this->assertSame([2 => 'upcoming'], $this->quarterStatuses($current));
         $this->assertSame([1 => 'active'], $this->quarterStatuses($next));
@@ -174,7 +187,7 @@ class SchoolYearTest extends TestCase
         $stamp = $quarter->refresh()->updated_at;
 
         Carbon::setTestNow(Carbon::parse('2026-09-29 10:00', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", self::BOTH)->assertOk();
 
         $this->assertSame('active', $quarter->refresh()->status);
         $this->assertEquals($stamp, $quarter->updated_at);
@@ -189,9 +202,11 @@ class SchoolYearTest extends TestCase
 
         // Fail on the quarter update, after the old year has already been demoted.
         Quarter::updating(fn () => throw new \RuntimeException('quarter update failed'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertServerError();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertServerError();
         Quarter::flushEventListeners();
 
+        // The new year's sections roll back with it.
+        $this->assertSame(0, DB::table('sections')->count());
         $this->assertSame('active', $current->refresh()->status);
         $this->assertSame('upcoming', $next->refresh()->status);
         $this->assertSame([2 => 'active'], $this->quarterStatuses($current));
@@ -205,7 +220,7 @@ class SchoolYearTest extends TestCase
         $this->quarter($current, 2, '2026-09-28', '2026-11-13', 'active');
         $this->quarter($next, 1, '2027-06-14', '2027-08-31');
 
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
 
         $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/quarters/1/activate")->assertOk()->assertJson(['status' => 'active']);
         $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/quarters/2/activate")->assertStatus(422);
@@ -221,7 +236,7 @@ class SchoolYearTest extends TestCase
         $stamp = $current->refresh()->updated_at;
 
         Carbon::setTestNow(Carbon::parse('2026-09-29 10:00', 'Asia/Manila'));
-        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", self::BOTH)
             ->assertOk()->assertJson(['status' => 'active']);
 
         $this->assertEquals($stamp, $current->refresh()->updated_at);
@@ -247,7 +262,7 @@ class SchoolYearTest extends TestCase
 
         [$current] = $this->twoYears();
         $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()
-            ->assertExactJson(['schoolYearId' => $current->id, 'name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15', 'status' => 'active']);
+            ->assertExactJson(['schoolYearId' => $current->id, 'name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15', 'status' => 'active', 'sections' => [], 'activeQuarter' => null]);
     }
 
     public function test_list_returns_stored_status_even_when_dates_disagree(): void
@@ -286,17 +301,22 @@ class SchoolYearTest extends TestCase
         $this->actingAs($tina)->getJson('/api/sections')->assertJsonCount(1);
         $this->actingAs($tina)->getJson('/api/learners')->assertJsonCount(1);
 
-        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        $oldRows = fn () => [
+            DB::table('sections')->where('school_year_id', $current->id)->get()->all(),
+            DB::table('learner_school_years')->get()->all(),
+        ];
+        $before = $oldRows();
 
-        // No fallback to the previous year's sections or learners.
-        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(0);
+        // The new year gets its own Joy; the old year's Joy, learner and enrollment stay where they were.
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", ['sections' => ['Joy']])
+            ->assertOk()->assertJson(['sections' => ['Joy']]);
+
+        $sections = $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(1)->json();
+        $this->assertNotSame($joy, $sections[0]['sectionId']);
+        $this->assertSame($next->id, DB::table('sections')->where('id', $sections[0]['sectionId'])->value('school_year_id'));
+        // No fallback to the previous year's learners.
         $this->actingAs($tina)->getJson('/api/learners')->assertOk()->assertJsonCount(0);
-
-        // New sections go to the newly active year; old rows stay where they were.
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->assertCreated();
-        $this->assertSame($next->id, DB::table('sections')->where('id', '!=', $joy)->value('school_year_id'));
-        $this->assertSame($current->id, DB::table('sections')->where('id', $joy)->value('school_year_id'));
-        $this->assertSame($current->id, DB::table('learner_school_years')->where('learner_id', $learner)->value('school_year_id'));
+        $this->assertEquals($before, $oldRows());
     }
 
     public function test_first_school_year_is_set_up_in_settings_after_a_fresh_seed(): void
@@ -316,8 +336,16 @@ class SchoolYearTest extends TestCase
 
         $id = $this->actingAs($tina)->postJson('/api/school-years', ['name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15'])
             ->assertCreated()->assertJson(['status' => 'upcoming'])->json('schoolYearId');
-        $this->actingAs($tina)->patchJson("/api/school-years/{$id}/activate")->assertOk()->assertJson(['status' => 'active']);
-        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['schoolYearId' => $id, 'name' => '2026-2027']);
+        $this->actingAs($tina)->patchJson("/api/school-years/{$id}/activate", self::BOTH)->assertOk()->assertJson(['status' => 'active']);
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['schoolYearId' => $id, 'name' => '2026-2027', 'sections' => ['Joy', 'Faith']]);
+
+        // Activation set up Joy (morning) and Faith (afternoon), with no learners.
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertExactJson([
+            ['sectionId' => DB::table('sections')->where('name', 'Joy')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning'],
+            ['sectionId' => DB::table('sections')->where('name', 'Faith')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith', 'session' => 'afternoon'],
+        ]);
+        $this->assertSame(0, DB::table('learners')->count());
+        $this->assertSame(0, DB::table('learner_school_years')->count());
     }
 
     public function test_creates_and_lists_school_years(): void
@@ -371,9 +399,9 @@ class SchoolYearTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $tina = $this->teacher();
         [$current, $next] = $this->twoYears();
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->assertCreated();
+        $this->setUpSections($tina, ['Joy'], $current);
 
-        // The next year's section, built by hand since sections are only created in the active year.
+        // The next year's section, built by hand.
         $hope = DB::table('sections')->insertGetId(['school_year_id' => $next->id, 'teacher_id' => $tina->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);
         $sectionModule = DB::table('section_modules')->insertGetId(['section_id' => $hope, 'module_id' => DB::table('modules')->value('id'), 'teacher_id' => $tina->id]);
         $schedule = DB::table('class_schedules')->insertGetId(['section_module_id' => $sectionModule, 'start_time' => '08:00', 'end_time' => '09:00', 'effective_from' => '2027-06-14', 'effective_until' => '2028-04-14']);

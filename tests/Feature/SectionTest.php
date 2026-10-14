@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\SchoolYear;
+use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -20,62 +21,143 @@ class SectionTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_needs_an_active_school_year(): void
+    private function year(string $name, string $start, string $end, string $status = 'upcoming'): SchoolYear
     {
-        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->assertStatus(422)->assertJsonValidationErrors('sectionName');
+        return SchoolYear::create(['name' => $name, 'start_date' => $start, 'end_date' => $end, 'status' => $status]);
     }
 
-    public function test_creates_section_with_modules_and_timetable_scoped_to_teacher(): void
+    /** @return array{0: string, 1: string} the start/end time of a section's Language class */
+    private function languageTimes(int $sectionId): array
+    {
+        return array_values((array) DB::table('class_schedules')
+            ->join('section_modules', 'section_modules.id', '=', 'class_schedules.section_module_id')
+            ->join('modules', 'modules.id', '=', 'section_modules.module_id')
+            ->where(['section_modules.section_id' => $sectionId, 'modules.code' => 'language'])
+            ->first(['start_time', 'end_time']));
+    }
+
+    public function test_sections_cannot_be_created_through_the_api_or_by_listing(): void
     {
         $this->seed(CurriculumSeeder::class);
-        SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
+        $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
 
         $this->getJson('/api/sections')->assertUnauthorized();
-
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->assertCreated()
-            ->assertJson(['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy']);
-
-        // Section names are unique per school year and grade, across teachers.
-        $this->actingAs($omar)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->assertStatus(422)->assertJsonValidationErrors('sectionName');
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Grade 9', 'sectionName' => 'Hope'])
-            ->assertStatus(422)->assertJsonValidationErrors('gradeLevel');
-
-        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(1);
-        $this->actingAs($omar)->getJson('/api/sections')->assertOk()->assertJsonCount(0);
-
-        $this->assertSame(5, DB::table('section_modules')->count());
-        $this->assertSame(5, DB::table('class_schedules')->count());
-        // Reading, Language, Writing on M/W/F plus MAPEH, Math on T/Th.
-        $this->assertSame(13, DB::table('schedule_days')->count());
-        $this->assertSame(['09:15:00', '10:00:00'], array_values((array) DB::table('class_schedules')
-            ->join('section_modules', 'section_modules.id', '=', 'class_schedules.section_module_id')
-            ->join('modules', 'modules.id', '=', 'section_modules.module_id')
-            ->where('modules.code', 'language')->first(['start_time', 'end_time'])));
+        $this->actingAs($tina)->postJson('/api/sections', ['sectionName' => 'Joy'])->assertMethodNotAllowed();
+        // Listing never sets anything up, even for an active year with no sections.
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(0);
+        $this->assertSame(0, DB::table('sections')->count());
     }
 
-    public function test_afternoon_section_gets_the_afternoon_timetable(): void
+    public function test_activation_sets_up_only_the_picked_sections(): void
     {
         $this->seed(CurriculumSeeder::class);
-        SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
+        $joyOnly = $this->year('2026-2027', '2026-06-01', '2027-03-31');
+        $faithOnly = $this->year('2027-2028', '2027-06-01', '2028-03-31');
+        $both = $this->year('2028-2029', '2028-06-01', '2029-03-31');
 
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Hope', 'session' => 'evening'])
-            ->assertStatus(422)->assertJsonValidationErrors('session');
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Hope', 'session' => 'afternoon'])
-            ->assertCreated();
-
+        $this->actingAs($tina)->patchJson("/api/school-years/{$joyOnly->id}/activate", ['sections' => ['joy']])
+            ->assertOk()->assertJson(['status' => 'active', 'sections' => ['Joy']]);
+        $sections = $this->actingAs($tina)->getJson('/api/sections')->assertOk()
+            ->assertExactJson([['sectionId' => DB::table('sections')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning']])
+            ->json();
+        // All five modules, each with its morning timetable: Reading, Language, Writing on M/W/F plus MAPEH, Math on T/Th.
+        $this->assertSame(5, DB::table('section_modules')->count());
+        $this->assertSame(5, DB::table('class_schedules')->count());
         $this->assertSame(13, DB::table('schedule_days')->count());
-        $this->assertSame(['14:15:00', '15:00:00'], array_values((array) DB::table('class_schedules')
-            ->join('section_modules', 'section_modules.id', '=', 'class_schedules.section_module_id')
-            ->join('modules', 'modules.id', '=', 'section_modules.module_id')
-            ->where('modules.code', 'language')->first(['start_time', 'end_time'])));
+        $this->assertSame(['09:15:00', '10:00:00'], $this->languageTimes($sections[0]['sectionId']));
+        $this->assertSame(['2026-06-01'], DB::table('class_schedules')->distinct()->pluck('effective_from')->all());
+        // Owned by the teacher who activated the year, module links included.
+        $this->assertSame([$tina->id], DB::table('section_modules')->distinct()->pluck('teacher_id')->all());
+        $this->actingAs($omar)->getJson('/api/sections')->assertOk()->assertJsonCount(0);
+
+        $this->actingAs($tina)->patchJson("/api/school-years/{$faithOnly->id}/activate", ['sections' => ['Faith']])
+            ->assertOk()->assertJson(['sections' => ['Faith']]);
+        $faith = $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(1)
+            ->assertJsonPath('0.sectionName', 'Faith')->assertJsonPath('0.session', 'afternoon')->json('0.sectionId');
+        $this->assertSame(['14:15:00', '15:00:00'], $this->languageTimes($faith));
+
+        $this->actingAs($tina)->patchJson("/api/school-years/{$both->id}/activate", ['sections' => ['Faith', 'Joy']])
+            ->assertOk()->assertJson(['sections' => ['Joy', 'Faith']]);
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(2)
+            ->assertJsonPath('0.sectionName', 'Joy')->assertJsonPath('1.sectionName', 'Faith');
+
+        // Each year kept exactly what it picked, and nothing came with learners.
+        $names = fn (SchoolYear $y) => DB::table('sections')->where('school_year_id', $y->id)->orderBy('name')->pluck('name')->all();
+        $this->assertSame([['Joy'], ['Faith'], ['Faith', 'Joy']], [$names($joyOnly), $names($faithOnly), $names($both)]);
+        $this->assertSame(0, DB::table('learner_school_years')->count());
+    }
+
+    public function test_a_years_sections_are_set_once_and_kept_with_their_records(): void
+    {
+        $this->seed(CurriculumSeeder::class);
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        $current = $this->year('2026-2027', '2026-06-01', '2027-03-31');
+        $next = $this->year('2027-2028', '2027-06-01', '2028-03-31');
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", ['sections' => ['Joy']])->assertOk();
+        $joy = DB::table('sections')->value('id');
+        $learner = DB::table('learners')->insertGetId(['first_name' => 'Ana', 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']);
+        DB::table('learner_school_years')->insert(['learner_id' => $learner, 'school_year_id' => $current->id, 'section_id' => $joy, 'enrolled_on' => '2026-06-01', 'status' => 'active']);
+        $snapshot = fn () => [
+            DB::table('sections')->orderBy('id')->get()->all(),
+            DB::table('section_modules')->orderBy('id')->get()->all(),
+            DB::table('class_schedules')->orderBy('id')->get()->all(),
+            DB::table('schedule_days')->orderBy('id')->get()->all(),
+            DB::table('learner_school_years')->get()->all(),
+        ];
+        $before = $snapshot();
+
+        // Faith can't be added to a year that's already set up, even by re-activating it.
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", ['sections' => ['Joy', 'Faith']])
+            ->assertStatus(422)->assertJsonValidationErrors(['sections' => "This school year's sections are already set up and can't be changed."]);
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")->assertOk()->assertJson(['sections' => ['Joy']]);
+        $this->assertEquals($before, $snapshot());
+
+        // Moving to the next year and back leaves the first year's Joy, its learner and timetable alone.
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", ['sections' => ['Joy', 'Faith']])->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")->assertOk();
+        $this->assertEquals($before[4], DB::table('learner_school_years')->get()->all());
+        $this->assertEquals($before[0], DB::table('sections')->where('school_year_id', $current->id)->orderBy('id')->get()->all());
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonCount(1)->assertJsonPath('0.sectionId', $joy);
+    }
+
+    public function test_activation_rejects_anything_but_joy_and_faith(): void
+    {
+        $this->seed(CurriculumSeeder::class);
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31');
+
+        $payloads = [[], ['sections' => []], ['sections' => 'Joy'], ['sections' => ['Hope']], ['sections' => ['Joy', 'joy']],
+            ['sections' => [1]], ['sections' => [['Joy']]], ['sections' => [null]], ['sections' => ['Joy', 'Hope']]];
+        foreach ($payloads as $payload) {
+            $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/activate", $payload)->assertStatus(422);
+        }
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/activate", ['sections' => ['Joy', 'joy']])
+            ->assertJsonValidationErrors('sections.1');
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/activate", ['sections' => [['Joy']]])
+            ->assertJsonValidationErrors('sections.0');
+        $this->assertSame('upcoming', $year->refresh()->status);
+        $this->assertSame(0, DB::table('sections')->count());
+    }
+
+    public function test_sections_from_before_the_fixed_choices_stay_listed(): void
+    {
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        $hope = Section::create(['school_year_id' => $year->id, 'teacher_id' => $tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Hope']);
+        $joy = Section::create(['school_year_id' => $year->id, 'teacher_id' => $tina->id, 'grade_level' => 'Kindergarten', 'name' => 'joy']);
+
+        // A lowercase joy still reads as the morning Joy and lists first; Hope is kept, without a session.
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertExactJson([
+            ['sectionId' => $joy->id, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'joy', 'session' => 'morning'],
+            ['sectionId' => $hope->id, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Hope', 'session' => null],
+        ]);
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['sections' => ['Joy']]);
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/activate", ['sections' => ['Faith']])
+            ->assertStatus(422)->assertJsonValidationErrors('sections');
+        $this->assertSame(2, DB::table('sections')->count());
     }
 
     public function test_active_session_shows_current_module_and_activity_scoped_to_teacher(): void
@@ -87,9 +169,7 @@ class SectionTest extends TestCase
             'start_date' => '2026-06-01', 'end_date' => '2026-08-31', 'status' => 'active',
         ]);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)
-            ->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
 
         // No class in session yet: both names read null, not an error.
         $this->actingAs($tina)->getJson("/api/sections/{$sectionId}/active-session")->assertOk()
@@ -135,9 +215,7 @@ class SectionTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)
-            ->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
 
         // No lessons yet — the section has modules, but nothing under them.
         $this->actingAs($tina)->getJson("/api/sections/{$sectionId}/curriculum-resources")->assertOk()
@@ -167,9 +245,7 @@ class SectionTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)
-            ->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
 
         // No quarter row at all yet.
         $this->actingAs($tina)->getJson("/api/sections/{$sectionId}/overall-progress")->assertOk()->assertContent('null');
@@ -220,9 +296,7 @@ class SectionTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)
-            ->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
 
         // No active quarter yet: today's module times still show (the timetable doesn't need a quarter), but no lessons.
         $response = $this->actingAs($tina)->getJson("/api/sections/{$sectionId}/todays-schedule")->assertOk()
@@ -280,9 +354,7 @@ class SectionTest extends TestCase
             'start_date' => '2026-06-01', 'end_date' => '2026-08-31', 'status' => 'active',
         ]);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)
-            ->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])
-            ->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
 
         $domainIds = DB::table('module_domains')
             ->join('modules', 'modules.id', '=', 'module_domains.module_id')
@@ -315,7 +387,7 @@ class SectionTest extends TestCase
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
 
         $rows = collect($this->actingAs($tina)->getJson("/api/sections/$sectionId/schedule")->assertOk()->json())->keyBy('moduleName');
         $this->assertCount(5, $rows);
@@ -351,7 +423,7 @@ class SectionTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $sectionId = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
+        $sectionId = $this->setUpSections($tina, ['Joy'])['Joy'];
         $domainId = DB::table('developmental_domains')->value('id');
         $this->actingAs($tina)->postJson('/api/modules', ['moduleName' => 'Science', 'domainIds' => [$domainId]])->assertCreated();
 

@@ -41,7 +41,6 @@ Route::middleware(['auth:sanctum', EnsureTeacherCanWork::class])->group(function
     Route::patch('/school-years/{schoolYear}/quarters/{number}/activate', [QuarterController::class, 'activate'])->whereNumber('schoolYear')->where('number', '[1-4]');
 
     Route::get('/sections', [SectionController::class, 'index']);
-    Route::post('/sections', [SectionController::class, 'store']);
     Route::get('/sections/{section}/checklist', [CurriculumController::class, 'sectionChecklist'])->whereNumber('section');
     Route::put('/sections/{section}/checklist/ratings', [CurriculumController::class, 'saveChecklistRating'])->whereNumber('section');
     Route::get('/sections/{section}/active-session', [SectionController::class, 'activeSession'])->whereNumber('section');

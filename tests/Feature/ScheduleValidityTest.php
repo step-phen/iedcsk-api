@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\SchoolYear;
+use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,11 +30,9 @@ class ScheduleValidityTest extends TestCase
         // Section timetables take the year's dates: valid 2026-06-16 through 2027-04-30.
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-16', 'end_date' => '2027-04-30', 'status' => 'active']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
-        $this->faith = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith'])->json('sectionId');
-        // Faith is the afternoon class.
-        DB::table('class_schedules')->whereIn('section_module_id', DB::table('section_modules')->where('section_id', $this->faith)->select('id'))
-            ->update(['start_time' => DB::raw("start_time + interval '5 hours'"), 'end_time' => DB::raw("end_time + interval '5 hours'")]);
+        $this->joy = $this->setUpSections($this->tina)['Joy'];
+        // Faith is the afternoon class (its default timetable).
+        $this->faith = Section::where('name', 'Faith')->value('id');
     }
 
     protected function tearDown(): void

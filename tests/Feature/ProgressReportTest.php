@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\SchoolYear;
+use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,7 +33,7 @@ class ProgressReportTest extends TestCase
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $this->omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
-        $this->section = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
+        $this->section = $this->setUpSections($this->tina, ['Joy'])['Joy'];
         foreach ([1 => 'active', 2 => 'upcoming'] as $n => $status) {
             $this->quarters[$n] = DB::table('quarters')->insertGetId(['school_year_id' => $year->id, 'quarter_number' => $n, 'name' => "Q{$n}", 'start_date' => '2026-0'.(5 + $n).'-01', 'end_date' => '2026-0'.(5 + $n).'-28', 'status' => $status]);
         }
@@ -154,7 +155,7 @@ class ProgressReportTest extends TestCase
         $this->actingAs($this->omar)->getJson("/api/progress-reports/{$id}/versions/1")->assertNotFound();
 
         // An enrollment from someone else's section cannot be put in Tina's.
-        $omars = $this->actingAs($this->omar)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Hope'])->json('sectionId');
+        $omars = Section::create(['school_year_id' => SchoolYear::active()->id, 'teacher_id' => $this->omar->id, 'grade_level' => 'Kindergarten', 'name' => 'Hope'])->id;
         DB::table('learner_school_years')->where('id', $this->gabriel)->update(['section_id' => $omars]);
         $this->generate(2)->assertJsonValidationErrors('enrollmentId');
         DB::table('learner_school_years')->where('id', $this->gabriel)->update(['section_id' => $this->section]);
