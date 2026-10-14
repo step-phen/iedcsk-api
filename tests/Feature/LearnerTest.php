@@ -114,14 +114,14 @@ class LearnerTest extends TestCase
     public function test_enrolls_into_whichever_year_is_active_and_rejects_others(): void
     {
         $next = SchoolYear::create(['name' => '2027-2028', 'start_date' => '2027-06-01', 'end_date' => '2028-03-31']);
-        $this->actingAs($this->tina)->patchJson("/api/school-years/{$next->id}/activate")->assertOk();
+        // The new year runs only Faith; Joy exists only in the old year.
+        $this->actingAs($this->tina)->patchJson("/api/school-years/{$next->id}/activate", ['sections' => ['Faith']])->assertOk();
 
         // The old year's name, or a section that only exists in the old year, no longer passes.
         $this->actingAs($this->tina)->postJson('/api/learners', $this->payload())
             ->assertStatus(422)->assertJsonValidationErrors(['schoolYear', 'section']);
 
-        Section::create(['school_year_id' => $next->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Joy']);
-        $res = $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['schoolYear' => '2027-2028']))->assertCreated();
+        $res = $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['schoolYear' => '2027-2028', 'section' => 'Faith']))->assertCreated();
 
         $this->assertSame($next->id, Learner::find($res->json('learnerId'))->enrollments()->value('school_year_id'));
     }

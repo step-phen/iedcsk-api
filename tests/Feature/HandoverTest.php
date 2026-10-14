@@ -32,7 +32,7 @@ class HandoverTest extends TestCase
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $past = SchoolYear::create(['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-03-31', 'status' => 'completed']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'secret123']);
-        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
+        $this->joy = $this->setUpSections($this->tina, ['Joy'])['Joy'];
 
         // Last year's class with one attendance mark Tina recorded.
         $this->old = DB::table('sections')->insertGetId(['school_year_id' => $past->id, 'teacher_id' => $this->tina->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);

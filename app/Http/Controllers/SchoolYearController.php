@@ -2,8 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ActivateSchoolYearRequest;
 use App\Models\Quarter;
 use App\Models\SchoolYear;
+use App\Models\Section;
+use App\Models\Teacher;
+use Illuminate\Container\Attributes\CurrentUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -17,7 +21,7 @@ class SchoolYearController extends Controller
     public function index(): JsonResponse
     {
         // Undated (future) years first, then newest first.
-        return response()->json(SchoolYear::orderByRaw('start_date DESC NULLS FIRST')->orderByDesc('name')->get()
+        return response()->json(SchoolYear::with('sections')->orderByRaw('start_date DESC NULLS FIRST')->orderByDesc('name')->get()
             ->map(fn (SchoolYear $y) => $y->toApiArray()));
     }
 
@@ -25,7 +29,10 @@ class SchoolYearController extends Controller
     {
         // fromJsonString keeps "no active year" a literal null; response()->json(null) would send "{}".
         return ($year = SchoolYear::active())
-            ? response()->json($year->toApiArray())
+            ? response()->json($year->toApiArray() + [
+                // Shown next to the year in the header, e.g. "SY 2026–2027 · 1st Quarter".
+                'activeQuarter' => Quarter::where('school_year_id', $year->id)->where('status', 'active')->value('name'),
+            ])
             : JsonResponse::fromJsonString('null');
     }
 
@@ -104,9 +111,9 @@ class SchoolYearController extends Controller
             ]);
 
             // Section timetables are created with the year's dates as their validity range
-            // (SectionController::store), so they follow the year when its dates change.
+            // (Section::setUp, at activation), so they follow the year when its dates change.
             // Only the two dates move; times, days and is_active are left alone.
-            // Undated years never have sections (only the active, dated year does).
+            // Undated years never have sections (only an activated, dated year does).
             if ($datesChanged && $start !== null) {
                 DB::table('class_schedules')
                     ->whereIn('section_module_id', DB::table('section_modules')
@@ -134,14 +141,17 @@ class SchoolYearController extends Controller
     // activated for it, and one already stored as active stays active.
     // school_years_one_active rejects two active rows, so the previous year is demoted
     // before the new one is promoted, all in one transaction.
-    public function activate(SchoolYear $schoolYear): JsonResponse
+    // A year without sections gets the picked ones (Joy, Faith, or both) in the same transaction;
+    // a year that already has sections keeps them exactly as they are (ActivateSchoolYearRequest).
+    public function activate(ActivateSchoolYearRequest $request, SchoolYear $schoolYear, #[CurrentUser] Teacher $teacher): JsonResponse
     {
-        if (! $schoolYear->start_date || ! $schoolYear->end_date) {
-            throw ValidationException::withMessages(['schoolYear' => 'Please set the school year start and end dates before activating it.']);
-        }
+        $sections = $request->validated('sections');
 
-        DB::transaction(function () use ($schoolYear) {
+        DB::transaction(function () use ($schoolYear, $teacher, $sections) {
             $previous = SchoolYear::where('status', 'active')->lockForUpdate()->first();
+            if ($sections) {
+                Section::setUp($schoolYear, $teacher, $sections);
+            }
             if ($previous?->is($schoolYear)) {
                 return;
             }

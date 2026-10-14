@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\SchoolYear;
+use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -31,7 +32,7 @@ class ClassroomSessionTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
+        $this->joy = $this->setUpSections($this->tina)['Joy'];
 
         foreach (['Ana', 'Ben', 'Cara'] as $name) {
             $id = DB::table('learners')->insertGetId(['first_name' => $name, 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']);
@@ -99,6 +100,8 @@ class ClassroomSessionTest extends TestCase
         // Another teacher can't see or run this section; no active quarter blocks starting.
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
         $this->actingAs($omar)->postJson("/api/sections/{$this->joy}/classroom/start", ['moduleId' => $this->reading(), 'lessonId' => $this->lesson, 'activityId' => $game])->assertNotFound();
+        // Omar's browser session isn't Tina's; start hers from a clean one.
+        $this->device();
         $this->start($game)->assertStatus(422)->assertJsonValidationErrors('activityId');
         $this->quarter();
         $this->start(99999)->assertStatus(422)->assertJsonValidationErrors('activityId');
@@ -190,7 +193,7 @@ class ClassroomSessionTest extends TestCase
         $this->actingAs($this->tina)->getJson("/api/sections/{$this->joy}/classroom-record?quarter=5")->assertStatus(422)->assertJsonValidationErrors('quarter');
 
         // A class runs in one section at a time.
-        $faith = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith'])->json('sectionId');
+        $faith = Section::where('name', 'Faith')->value('id');
         $this->actingAs($this->tina)->postJson("/api/sections/{$faith}/classroom/start", ['moduleId' => $this->reading(), 'lessonId' => $this->lesson, 'activityId' => $other])
             ->assertStatus(422)->assertJsonValidationErrors(['activityId' => 'End the class in Joy first.']);
 
