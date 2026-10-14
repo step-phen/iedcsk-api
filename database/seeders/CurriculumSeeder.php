@@ -33,8 +33,8 @@ class CurriculumSeeder extends Seeder
         }
 
         foreach (self::MODULES as $code => [$name, $domainCodes]) {
-            DB::table('modules')->updateOrInsert(['grade_level' => 'Kinder 1', 'code' => $code], ['name' => $name]);
-            $moduleId = DB::table('modules')->where(['grade_level' => 'Kinder 1', 'code' => $code])->value('id');
+            DB::table('modules')->updateOrInsert(['grade_level' => 'Kindergarten', 'code' => $code], ['name' => $name]);
+            $moduleId = DB::table('modules')->where(['grade_level' => 'Kindergarten', 'code' => $code])->value('id');
 
             foreach ($domainCodes as $domainCode) {
                 DB::table('module_domains')->insertOrIgnore([

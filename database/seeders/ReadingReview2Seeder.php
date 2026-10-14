@@ -79,7 +79,7 @@ class ReadingReview2Seeder extends Seeder
             }
 
             $domainId = DB::table('developmental_domains')->where('code', 'reading_language')->value('id');
-            $item = ['domain_id' => $domainId, 'grade_level' => 'Kinder 1', 'quarter_number' => 2, 'item' => static::CHECKLIST_ITEM];
+            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => 2, 'item' => static::CHECKLIST_ITEM];
             $existing = DB::table('developmental_checklist_items')->where('activity_id', $activityId)->value('id')
                 ?? DB::table('developmental_checklist_items')->where($item)->value('id');
             if ($existing) {

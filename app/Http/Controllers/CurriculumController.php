@@ -23,7 +23,7 @@ use Illuminate\Validation\ValidationException;
 class CurriculumController extends Controller
 {
     // The only grade level the app supports.
-    public const GRADE_LEVEL = 'Kinder 1';
+    public const GRADE_LEVEL = 'Kindergarten';
 
     public const DAY_NAMES = [1 => 'MONDAY', 2 => 'TUESDAY', 3 => 'WEDNESDAY', 4 => 'THURSDAY', 5 => 'FRIDAY', 6 => 'SATURDAY', 7 => 'SUNDAY'];
 

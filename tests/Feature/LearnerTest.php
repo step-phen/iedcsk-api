@@ -30,7 +30,7 @@ class LearnerTest extends TestCase
         $this->seed(ProvinceSeeder::class);
         $this->year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kinder 1', 'name' => 'Joy']);
+        Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Joy']);
     }
 
     private function payload(array $overrides = []): array
@@ -45,7 +45,7 @@ class LearnerTest extends TestCase
             'cityMunicipality' => 'Pasig',
             'provinceId' => Province::value('id'),
             'zipCode' => '1600',
-            'gradeLevel' => 'Kinder 1',
+            'gradeLevel' => 'Kindergarten',
             'section' => 'Joy',
             'schoolYear' => '2026-2027',
             'guardianCount' => 2,
@@ -120,7 +120,7 @@ class LearnerTest extends TestCase
         $this->actingAs($this->tina)->postJson('/api/learners', $this->payload())
             ->assertStatus(422)->assertJsonValidationErrors(['schoolYear', 'section']);
 
-        Section::create(['school_year_id' => $next->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kinder 1', 'name' => 'Joy']);
+        Section::create(['school_year_id' => $next->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Joy']);
         $res = $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['schoolYear' => '2027-2028']))->assertCreated();
 
         $this->assertSame($next->id, Learner::find($res->json('learnerId'))->enrollments()->value('school_year_id'));
@@ -143,7 +143,7 @@ class LearnerTest extends TestCase
             ->assertJsonCount(1)
             ->assertJsonPath('0.firstName', 'Ana')
             ->assertJsonPath('0.section', 'Joy')
-            ->assertJsonPath('0.gradeLevel', 'Kinder 1')
+            ->assertJsonPath('0.gradeLevel', 'Kindergarten')
             ->assertJsonPath('0.photoUrl', null);
 
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
@@ -152,7 +152,7 @@ class LearnerTest extends TestCase
 
     public function test_filters_by_section_scoped_to_owning_teacher(): void
     {
-        $love = Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kinder 1', 'name' => 'Love']);
+        $love = Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Love']);
         $joyId = Section::where('name', 'Joy')->value('id');
 
         $this->actingAs($this->tina)->postJson('/api/learners', $this->payload())->assertCreated();
@@ -175,7 +175,7 @@ class LearnerTest extends TestCase
         $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['firstName' => 'Ben']))->assertCreated();
         $enrollment = fn (string $first) => DB::table('learner_school_years')->join('learners', 'learners.id', '=', 'learner_id')->where('first_name', $first)->value('learner_school_years.id');
         $domain = DB::table('developmental_domains')->insertGetId(['code' => 'math', 'name' => 'Math', 'display_order' => 1]);
-        $item = fn (int $quarter) => DB::table('developmental_checklist_items')->insertGetId(['domain_id' => $domain, 'item' => "Skill Q{$quarter}", 'grade_level' => 'Kinder 1', 'quarter_number' => $quarter, 'display_order' => 1]);
+        $item = fn (int $quarter) => DB::table('developmental_checklist_items')->insertGetId(['domain_id' => $domain, 'item' => "Skill Q{$quarter}", 'grade_level' => 'Kindergarten', 'quarter_number' => $quarter, 'display_order' => 1]);
         $rate = fn (string $first, int $item, int $quarter, string $rating) => DB::table('learner_developmental_checklists')->updateOrInsert(
             ['enrollment_id' => $enrollment($first), 'checklist_item_id' => $item, 'quarter_id' => DB::table('quarters')->where(['school_year_id' => $this->year->id, 'quarter_number' => $quarter])->value('id')],
             ['teacher_id' => $this->tina->id, 'rating' => $rating, 'assessed_at' => now()],
@@ -217,7 +217,7 @@ class LearnerTest extends TestCase
 
         // Progress lists the grade's checklist skills, each with this learner's rating for the skill's own quarter.
         $domain = DB::table('developmental_domains')->insertGetId(['code' => 'reading_language', 'name' => 'Reading and Language Development', 'display_order' => 1]);
-        $item = fn (string $text, int $quarter, string $grade = 'Kinder 1') => DB::table('developmental_checklist_items')
+        $item = fn (string $text, int $quarter, string $grade = 'Kindergarten') => DB::table('developmental_checklist_items')
             ->insertGetId(['domain_id' => $domain, 'item' => $text, 'grade_level' => $grade, 'quarter_number' => $quarter, 'display_order' => 1]);
         $same = $item('Tells same from different', 1);
         $item('Reads short words', 2);

@@ -32,10 +32,10 @@ class HandoverTest extends TestCase
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $past = SchoolYear::create(['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-03-31', 'status' => 'completed']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'secret123']);
-        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->json('sectionId');
+        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
 
         // Last year's class with one attendance mark Tina recorded.
-        $this->old = DB::table('sections')->insertGetId(['school_year_id' => $past->id, 'teacher_id' => $this->tina->id, 'name' => 'Hope', 'grade_level' => 'Kinder 1']);
+        $this->old = DB::table('sections')->insertGetId(['school_year_id' => $past->id, 'teacher_id' => $this->tina->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);
         $ana = DB::table('learners')->insertGetId(['first_name' => 'Ana', 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']);
         $enrollment = DB::table('learner_school_years')->insertGetId(['learner_id' => $ana, 'school_year_id' => $past->id, 'section_id' => $this->old, 'enrolled_on' => '2025-06-01', 'status' => 'completed']);
         $this->attendanceId = DB::table('attendance')->insertGetId(['enrollment_id' => $enrollment, 'attendance_date' => '2025-07-01', 'status' => 'present', 'recorded_by' => $this->tina->id, 'recorded_at' => now()]);

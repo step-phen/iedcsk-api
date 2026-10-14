@@ -71,7 +71,7 @@ class ShapeHuntSeeder extends Seeder
 
             // The skill this game practises, on the Developmental Checklist under Math Readiness for Quarter 2.
             $domainId = DB::table('developmental_domains')->where('code', 'math_readiness')->value('id');
-            $item = ['domain_id' => $domainId, 'grade_level' => 'Kinder 1', 'quarter_number' => 2, 'item' => self::CHECKLIST_ITEM];
+            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => 2, 'item' => self::CHECKLIST_ITEM];
             // Matched by activity first, so renaming the item updates its row instead of adding a second one.
             $existing = DB::table('developmental_checklist_items')->where('activity_id', $activityId)->value('id')
                 ?? DB::table('developmental_checklist_items')->where($item)->value('id');

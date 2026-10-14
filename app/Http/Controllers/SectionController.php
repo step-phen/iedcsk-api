@@ -15,9 +15,9 @@ use Illuminate\Validation\ValidationException;
 
 class SectionController extends Controller
 {
-    private const GRADE_LEVELS = ['Kinder 1'];
+    private const GRADE_LEVELS = ['Kindergarten'];
 
-    // Default Kinder 1 timetables per session: module code => [start, end, ISO weekdays].
+    // Default Kindergarten timetables per session: module code => [start, end, ISO weekdays].
     private const TIMETABLES = [
         'morning' => [
             'reading' => ['08:00', '09:00', [1, 3, 5]],

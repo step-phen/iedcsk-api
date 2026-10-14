@@ -31,7 +31,7 @@ class ClassroomSessionTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->json('sectionId');
+        $this->joy = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
 
         foreach (['Ana', 'Ben', 'Cara'] as $name) {
             $id = DB::table('learners')->insertGetId(['first_name' => $name, 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']);
@@ -190,7 +190,7 @@ class ClassroomSessionTest extends TestCase
         $this->actingAs($this->tina)->getJson("/api/sections/{$this->joy}/classroom-record?quarter=5")->assertStatus(422)->assertJsonValidationErrors('quarter');
 
         // A class runs in one section at a time.
-        $faith = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Faith'])->json('sectionId');
+        $faith = $this->actingAs($this->tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith'])->json('sectionId');
         $this->actingAs($this->tina)->postJson("/api/sections/{$faith}/classroom/start", ['moduleId' => $this->reading(), 'lessonId' => $this->lesson, 'activityId' => $other])
             ->assertStatus(422)->assertJsonValidationErrors(['activityId' => 'End the class in Joy first.']);
 

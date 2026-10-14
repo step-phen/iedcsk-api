@@ -28,7 +28,7 @@ class CurriculumTest extends TestCase
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
-        $section = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->json('sectionId');
+        $section = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
 
         $learner = fn (string $first, string $last, string $status) => DB::table('learner_school_years')->insertGetId([
             'learner_id' => DB::table('learners')->insertGetId(['first_name' => $first, 'last_name' => $last, 'birth_date' => '2021-01-01']),
@@ -42,7 +42,7 @@ class CurriculumTest extends TestCase
         $counting = DB::table('activities')->insertGetId(['lesson_id' => DB::table('lessons')->insertGetId([
             'module_domain_id' => DB::table('module_domains')->where('domain_id', $math)->value('id'), 'title' => 'Counting', 'quarter_number' => 2, 'week_number' => 1, 'sequence_order' => 1,
         ]), 'activity_code' => 'MT-Q2W1-01', 'name' => 'Count the Apples', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 1]);
-        $item = DB::table('developmental_checklist_items')->insertGetId(['domain_id' => $math, 'item' => 'Counts to 10', 'grade_level' => 'Kinder 1', 'quarter_number' => 2, 'activity_id' => $counting, 'display_order' => 1]);
+        $item = DB::table('developmental_checklist_items')->insertGetId(['domain_id' => $math, 'item' => 'Counts to 10', 'grade_level' => 'Kindergarten', 'quarter_number' => 2, 'activity_id' => $counting, 'display_order' => 1]);
         DB::table('developmental_checklist_items')->insert(['domain_id' => $math, 'item' => 'Other grade', 'grade_level' => 'Grade 1', 'quarter_number' => 1, 'display_order' => 2]);
         $q2 = DB::table('quarters')->insertGetId(['school_year_id' => $year->id, 'quarter_number' => 2, 'name' => 'Q2', 'start_date' => '2026-08-01', 'end_date' => '2026-10-31', 'status' => 'active']);
         DB::table('learner_developmental_checklists')->insert([
@@ -98,7 +98,7 @@ class CurriculumTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $section = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->json('sectionId');
+        $section = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
         $math = DB::table('developmental_domains')->where('code', 'math_readiness')->value('id');
         $writing = DB::table('developmental_domains')->where('code', 'writing_readiness')->value('id');
         $counting = DB::table('activities')->insertGetId(['lesson_id' => DB::table('lessons')->insertGetId([
@@ -145,12 +145,12 @@ class CurriculumTest extends TestCase
 
         $this->seed(CurriculumSeeder::class);
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
-        $old =SchoolYear::create(['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-03-31', 'status' => 'completed']);
+        $old = SchoolYear::create(['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-03-31', 'status' => 'completed']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
-        $joy = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->json('sectionId');
-        $faith = $this->actingAs($omar)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Faith'])->json('sectionId');
-        $oldSection = DB::table('sections')->insertGetId(['school_year_id' => $old->id, 'teacher_id' => $tina->id, 'name' => 'Hope', 'grade_level' => 'Kinder 1']);
+        $joy = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->json('sectionId');
+        $faith = $this->actingAs($omar)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith'])->json('sectionId');
+        $oldSection = DB::table('sections')->insertGetId(['school_year_id' => $old->id, 'teacher_id' => $tina->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);
         $math = DB::table('developmental_domains')->where('code', 'math_readiness')->value('id');
 
         $counts = fn () => [DB::table('modules')->count(), DB::table('developmental_domains')->count(), DB::table('module_domains')->count(), DB::table('section_modules')->count()];
@@ -171,7 +171,7 @@ class CurriculumTest extends TestCase
             ->assertCreated()->assertJson(['moduleName' => 'Science Explorers', 'scheduleDays' => [], 'lessons' => []])->json();
 
         $module = DB::table('modules')->find($created['id']);
-        $this->assertSame(['science_explorers', 'Science Explorers', 'Kinder 1'], [$module->code, $module->name, $module->grade_level]);
+        $this->assertSame(['science_explorers', 'Science Explorers', 'Kindergarten'], [$module->code, $module->name, $module->grade_level]);
 
         $newDomain = DB::table('developmental_domains')->where('name', 'Science Discovery')->first();
         $this->assertSame('science_discovery', $newDomain->code);
@@ -203,7 +203,7 @@ class CurriculumTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $joy = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->assertCreated()->json('sectionId');
+        $joy = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->assertCreated()->json('sectionId');
 
         $reading = DB::table('modules')->where('code', 'reading')->value('id');
         $mapping = DB::table('module_domains')->where('module_id', $reading)->value('id');
@@ -234,8 +234,8 @@ class CurriculumTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-16', 'end_date' => '2027-04-30', 'status' => 'active']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $joy = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->assertCreated()->json('sectionId');
-        $faith = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Faith'])->assertCreated()->json('sectionId');
+        $joy = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->assertCreated()->json('sectionId');
+        $faith = $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith'])->assertCreated()->json('sectionId');
         // Faith moves to the afternoon; Joy keeps the default morning timetable.
         foreach (['reading' => ['13:00', '14:00'], 'language' => ['14:15', '15:00'], 'writing' => ['15:00', '16:00'], 'mapeh' => ['13:00', '14:30'], 'math' => ['14:45', '16:00']] as $code => [$start, $end]) {
             DB::table('class_schedules')->whereIn('section_module_id', DB::table('section_modules')
@@ -384,7 +384,7 @@ class CurriculumTest extends TestCase
         $edit($payload, $digital)->assertNotFound();
 
         // Deleting hides it and unlinks its skills, but not while a class is running it.
-        $skill = DB::table('developmental_checklist_items')->insertGetId(['domain_id' => DB::table('developmental_domains')->value('id'), 'item' => 'Hops', 'grade_level' => 'Kinder 1', 'quarter_number' => 1, 'activity_id' => $id, 'display_order' => 1]);
+        $skill = DB::table('developmental_checklist_items')->insertGetId(['domain_id' => DB::table('developmental_domains')->value('id'), 'item' => 'Hops', 'grade_level' => 'Kindergarten', 'quarter_number' => 1, 'activity_id' => $id, 'display_order' => 1]);
         $this->actingAs($tina)->deleteJson("/api/practical-activities/{$digital}")->assertNotFound();
         $this->actingAs($tina)->deleteJson("/api/practical-activities/{$id}")->assertOk();
         $this->assertFalse((bool) DB::table('activities')->where('id', $id)->value('is_active'));

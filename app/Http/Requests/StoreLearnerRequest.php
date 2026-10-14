@@ -9,7 +9,7 @@ use Illuminate\Validation\Rule;
 
 class StoreLearnerRequest extends FormRequest
 {
-    private const GRADE_LEVELS = ['Kinder 1'];
+    private const GRADE_LEVELS = ['Kindergarten'];
 
     private const EXTENSION_NAMES = ['Jr.', 'Sr.', 'II', 'III', 'IV', 'V'];
 
