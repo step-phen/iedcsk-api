@@ -7,7 +7,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
-// Checks the database-level rules from the Kinder 1 structure spec.
+// Checks the database-level rules from the Kindergarten structure spec.
 class SchemaRulesTest extends TestCase
 {
     use RefreshDatabase;
@@ -38,7 +38,7 @@ class SchemaRulesTest extends TestCase
 
     private function enroll(int $year, int $teacher): int
     {
-        $section = DB::table('sections')->insertGetId(['school_year_id' => $year, 'teacher_id' => $teacher, 'name' => 'Joy', 'grade_level' => 'Kinder 1']);
+        $section = DB::table('sections')->insertGetId(['school_year_id' => $year, 'teacher_id' => $teacher, 'name' => 'Joy', 'grade_level' => 'Kindergarten']);
         $learner = DB::table('learners')->insertGetId(['first_name' => 'A', 'last_name' => 'B', 'birth_date' => '2021-01-01']);
 
         return DB::table('learner_school_years')->insertGetId(['learner_id' => $learner, 'school_year_id' => $year, 'section_id' => $section, 'enrolled_on' => '2026-06-01', 'status' => 'active']);
@@ -78,9 +78,9 @@ class SchemaRulesTest extends TestCase
     {
         $year = $this->year('2026-2027', 'active');
         $teacher = $this->teacher();
-        $section = DB::table('sections')->insertGetId(['school_year_id' => $year, 'teacher_id' => $teacher, 'name' => 'Joy', 'grade_level' => 'Kinder 1']);
-        $reading = DB::table('modules')->insertGetId(['code' => 'reading', 'name' => 'Reading', 'grade_level' => 'Kinder 1']);
-        $math = DB::table('modules')->insertGetId(['code' => 'math', 'name' => 'Math', 'grade_level' => 'Kinder 1']);
+        $section = DB::table('sections')->insertGetId(['school_year_id' => $year, 'teacher_id' => $teacher, 'name' => 'Joy', 'grade_level' => 'Kindergarten']);
+        $reading = DB::table('modules')->insertGetId(['code' => 'reading', 'name' => 'Reading', 'grade_level' => 'Kindergarten']);
+        $math = DB::table('modules')->insertGetId(['code' => 'math', 'name' => 'Math', 'grade_level' => 'Kindergarten']);
         $joyReading = DB::table('section_modules')->insertGetId(['section_id' => $section, 'module_id' => $reading, 'teacher_id' => $teacher]);
         $joyMath = DB::table('section_modules')->insertGetId(['section_id' => $section, 'module_id' => $math, 'teacher_id' => $teacher]);
         $schedule = fn (int $sectionModule, string $start, string $end, bool $active = true) => DB::table('class_schedules')->insertGetId([
@@ -104,10 +104,10 @@ class SchemaRulesTest extends TestCase
 
     public function test_curriculum_and_result_rules(): void
     {
-        $module = DB::table('modules')->insertGetId(['code' => 'math', 'name' => 'Math', 'grade_level' => 'Kinder 1']);
+        $module = DB::table('modules')->insertGetId(['code' => 'math', 'name' => 'Math', 'grade_level' => 'Kindergarten']);
         // Any new module code is allowed, but not twice in the same grade level.
-        DB::table('modules')->insert(['code' => 'science', 'name' => 'Science', 'grade_level' => 'Kinder 1']);
-        $this->assertRejected(fn () => DB::table('modules')->insert(['code' => 'math', 'name' => 'Math 2', 'grade_level' => 'Kinder 1']));
+        DB::table('modules')->insert(['code' => 'science', 'name' => 'Science', 'grade_level' => 'Kindergarten']);
+        $this->assertRejected(fn () => DB::table('modules')->insert(['code' => 'math', 'name' => 'Math 2', 'grade_level' => 'Kindergarten']));
         $domain = DB::table('developmental_domains')->insertGetId(['code' => 'math_readiness', 'name' => 'Math Readiness', 'display_order' => 1]);
         $mapping = DB::table('module_domains')->insertGetId(['module_id' => $module, 'domain_id' => $domain]);
 

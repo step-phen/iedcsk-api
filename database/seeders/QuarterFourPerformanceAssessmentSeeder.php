@@ -45,7 +45,7 @@ class QuarterFourPerformanceAssessmentSeeder extends Seeder
 
             // The skill this activity practises, on the Developmental Checklist under Gross Motor Development for Quarter 4.
             $domainId = DB::table('developmental_domains')->where('code', 'gross_motor')->value('id');
-            $item = ['domain_id' => $domainId, 'grade_level' => 'Kinder 1', 'quarter_number' => 4, 'item' => self::CHECKLIST_ITEM];
+            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => 4, 'item' => self::CHECKLIST_ITEM];
             // Matched by activity first, so renaming the item updates its row instead of adding a second one.
             $existing = DB::table('developmental_checklist_items')->where('activity_id', $activityId)->value('id')
                 ?? DB::table('developmental_checklist_items')->where($item)->value('id');

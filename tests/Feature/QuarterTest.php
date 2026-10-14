@@ -47,7 +47,7 @@ class QuarterTest extends TestCase
     public function test_activates_a_quarter_and_the_dashboard_reads_it(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-09-28 10:00', 'Asia/Manila'));
-        $section = Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kinder 1', 'name' => 'Joy']);
+        $section = Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Joy']);
         $this->saveQuarter(1, '2026-06-15', '2026-09-25')->assertCreated();
         $this->saveQuarter(2, '2026-09-28', '2026-11-13')->assertCreated();
 

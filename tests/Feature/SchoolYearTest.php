@@ -279,7 +279,7 @@ class SchoolYearTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-09-28 10:00', 'Asia/Manila'));
         $tina = $this->teacher();
         [$current, $next] = $this->twoYears();
-        $joy = DB::table('sections')->insertGetId(['school_year_id' => $current->id, 'teacher_id' => $tina->id, 'name' => 'Joy', 'grade_level' => 'Kinder 1']);
+        $joy = DB::table('sections')->insertGetId(['school_year_id' => $current->id, 'teacher_id' => $tina->id, 'name' => 'Joy', 'grade_level' => 'Kindergarten']);
         $learner = DB::table('learners')->insertGetId(['first_name' => 'Ana', 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']);
         DB::table('learner_school_years')->insert(['learner_id' => $learner, 'school_year_id' => $current->id, 'section_id' => $joy, 'enrolled_on' => '2026-06-15', 'status' => 'active']);
 
@@ -293,7 +293,7 @@ class SchoolYearTest extends TestCase
         $this->actingAs($tina)->getJson('/api/learners')->assertOk()->assertJsonCount(0);
 
         // New sections go to the newly active year; old rows stay where they were.
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->assertCreated();
+        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->assertCreated();
         $this->assertSame($next->id, DB::table('sections')->where('id', '!=', $joy)->value('school_year_id'));
         $this->assertSame($current->id, DB::table('sections')->where('id', $joy)->value('school_year_id'));
         $this->assertSame($current->id, DB::table('learner_school_years')->where('learner_id', $learner)->value('school_year_id'));
@@ -371,10 +371,10 @@ class SchoolYearTest extends TestCase
         $this->seed(CurriculumSeeder::class);
         $tina = $this->teacher();
         [$current, $next] = $this->twoYears();
-        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kinder 1', 'sectionName' => 'Joy'])->assertCreated();
+        $this->actingAs($tina)->postJson('/api/sections', ['gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy'])->assertCreated();
 
         // The next year's section, built by hand since sections are only created in the active year.
-        $hope = DB::table('sections')->insertGetId(['school_year_id' => $next->id, 'teacher_id' => $tina->id, 'name' => 'Hope', 'grade_level' => 'Kinder 1']);
+        $hope = DB::table('sections')->insertGetId(['school_year_id' => $next->id, 'teacher_id' => $tina->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);
         $sectionModule = DB::table('section_modules')->insertGetId(['section_id' => $hope, 'module_id' => DB::table('modules')->value('id'), 'teacher_id' => $tina->id]);
         $schedule = DB::table('class_schedules')->insertGetId(['section_module_id' => $sectionModule, 'start_time' => '08:00', 'end_time' => '09:00', 'effective_from' => '2027-06-14', 'effective_until' => '2028-04-14']);
         DB::table('schedule_days')->insert(['schedule_id' => $schedule, 'day_of_week' => 1]);

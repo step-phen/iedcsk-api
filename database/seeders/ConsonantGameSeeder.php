@@ -74,7 +74,7 @@ abstract class ConsonantGameSeeder extends Seeder
             }
 
             $domainId = DB::table('developmental_domains')->where('code', 'reading_language')->value('id');
-            $item = ['domain_id' => $domainId, 'grade_level' => 'Kinder 1', 'quarter_number' => static::QUARTER, 'item' => $checklistItem];
+            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => static::QUARTER, 'item' => $checklistItem];
             $existing = DB::table('developmental_checklist_items')->where('activity_id', $activityId)->value('id')
                 ?? DB::table('developmental_checklist_items')->where($item)->value('id');
             if ($existing) {

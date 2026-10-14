@@ -67,7 +67,7 @@ class PictureDetectiveSeeder extends Seeder
 
             // The skill this game practises, on the Developmental Checklist under Reading and Language for Quarter 1.
             $domainId = DB::table('developmental_domains')->where('code', 'reading_language')->value('id');
-            $item = ['domain_id' => $domainId, 'grade_level' => 'Kinder 1', 'quarter_number' => 1, 'item' => self::CHECKLIST_ITEM];
+            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => 1, 'item' => self::CHECKLIST_ITEM];
             // Matched by activity first, so renaming the item updates its row instead of adding a second one.
             $existing = DB::table('developmental_checklist_items')->where('activity_id', $activityId)->value('id')
                 ?? DB::table('developmental_checklist_items')->where($item)->value('id');
