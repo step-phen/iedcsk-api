@@ -59,7 +59,7 @@ class MathSkillsReview3Seeder extends Seeder
                 unset($round['answer']);
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'card-' . ($i + 1),
+                    'question_key' => 'card-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode($round),
                     'correct_answer' => json_encode(['answer' => $answer]),

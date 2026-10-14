@@ -12,7 +12,7 @@ class NotificationController extends Controller
     // The teacher's latest learner finishes, newest first, for the header bell.
     public function index(#[CurrentUser] Teacher $teacher): JsonResponse
     {
-        $mine = fn() => DB::table('notifications')->where('notifications.teacher_id', $teacher->id);
+        $mine = fn () => DB::table('notifications')->where('notifications.teacher_id', $teacher->id);
 
         return response()->json([
             'unread' => $mine()->whereNull('read_at')->count(),
@@ -21,15 +21,15 @@ class NotificationController extends Controller
                 ->join('learner_activity_assignments', 'learner_activity_assignments.id', '=', 'notifications.assignment_id')
                 ->join('learner_school_years', 'learner_school_years.id', '=', 'learner_activity_assignments.enrollment_id')
                 ->orderByDesc('notifications.id')->limit(30)
-                ->get(['notifications.*', 'learner_school_years.section_id'])->map(fn($n) => [
-                'id' => $n->id,
-                'sectionId' => $n->section_id,
-                'kind' => $n->kind,
-                'learnerName' => $n->learner_name,
-                'activityName' => $n->activity_name,
-                'read' => $n->read_at !== null,
-                'createdAt' => $n->created_at,
-            ]),
+                ->get(['notifications.*', 'learner_school_years.section_id'])->map(fn ($n) => [
+                    'id' => $n->id,
+                    'sectionId' => $n->section_id,
+                    'kind' => $n->kind,
+                    'learnerName' => $n->learner_name,
+                    'activityName' => $n->activity_name,
+                    'read' => $n->read_at !== null,
+                    'createdAt' => $n->created_at,
+                ]),
         ]);
     }
 

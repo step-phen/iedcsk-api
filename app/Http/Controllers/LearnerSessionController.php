@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\ClassSession;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -23,16 +24,16 @@ class LearnerSessionController extends Controller
         if (! $session) {
             $learners = $this->presentToday()->orderBy('learners.first_name')->get(['learners.id', 'learners.first_name', 'learners.avatar_url']);
 
-            return response()->json(['learners' => $learners->map(fn($l) => $this->pickerRow($l))]);
+            return response()->json(['learners' => $learners->map(fn ($l) => $this->pickerRow($l))]);
         }
 
         $active = ClassSession::activeActivity($session->id);
         // Mid-activity on another device, unless they already finished this activity in an earlier class (then they are done, not busy).
         $busy = $active
             ? DB::table('learner_activity_assignments')->where(['session_activity_id' => $active->session_activity_id, 'status' => 'in_progress'])
-            ->whereNotIn('enrollment_id', DB::table('learner_activity_assignments')
-                ->where(['activity_id' => $active->activity_id, 'status' => 'completed'])->select('enrollment_id'))
-            ->pluck('enrollment_id')
+                ->whereNotIn('enrollment_id', DB::table('learner_activity_assignments')
+                    ->where(['activity_id' => $active->activity_id, 'status' => 'completed'])->select('enrollment_id'))
+                ->pluck('enrollment_id')
             : collect();
 
         $learners = DB::table('classroom_session_learners')
@@ -44,7 +45,7 @@ class LearnerSessionController extends Controller
             ->orderBy('learners.first_name')
             ->get(['learners.id', 'learners.first_name', 'learners.avatar_url']);
 
-        return response()->json(['learners' => $learners->map(fn($l) => $this->pickerRow($l))]);
+        return response()->json(['learners' => $learners->map(fn ($l) => $this->pickerRow($l))]);
     }
 
     // First name and photo only: this list is shown before anyone is identified.
@@ -56,7 +57,7 @@ class LearnerSessionController extends Controller
     // Same public-disk URL the teacher's learner list uses; null when no photo was uploaded.
     private function photoUrl(?string $path): ?string
     {
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('public');
 
         return $path ? $disk->url($path) : null;
@@ -179,7 +180,7 @@ class LearnerSessionController extends Controller
             'completed' => true,
             'score' => $attempt?->score !== null ? (float) $attempt->score : null,
             'total' => $attempt?->max_score !== null ? (float) $attempt->max_score : null,
-        ], fn($v) => $v !== null));
+        ], fn ($v) => $v !== null));
     }
 
     // Start (or resume) the activity on screen; the teacher's attendance mark decides who may play.
@@ -268,7 +269,7 @@ class LearnerSessionController extends Controller
             // Decoy items marked gradable:false never count toward score or total.
             ->whereRaw("coalesce(question_data->>'gradable', 'true') <> 'false'")
             ->pluck('correct_answer', 'question_key')
-            ->map(fn($answer) => json_decode($answer)->answer);
+            ->map(fn ($answer) => json_decode($answer)->answer);
         if ($key->isEmpty()) {
             return response()->json(['message' => 'This activity cannot be graded.'], 400);
         }
@@ -279,7 +280,7 @@ class LearnerSessionController extends Controller
             $given[$answer['questionId']] ??= $answer['response'];
         }
         $total = $key->count();
-        $score = $key->filter(fn($correct, $questionId) => ($given[$questionId] ?? null) === $correct)->count();
+        $score = $key->filter(fn ($correct, $questionId) => ($given[$questionId] ?? null) === $correct)->count();
 
         return $this->complete($stored, $active, ['status' => 'evaluated', 'score' => $score, 'max_score' => $total, 'evaluated_at' => now()])
             ?? response()->json(['success' => true, 'score' => $score, 'total' => $total]);
@@ -331,7 +332,7 @@ class LearnerSessionController extends Controller
             return response()->json(['message' => 'No questions found for this activity.'], 404);
         }
 
-        return response()->json($questions->map(fn($q) => [
+        return response()->json($questions->map(fn ($q) => [
             'questionKey' => $q->question_key,
             'questionOrder' => $q->question_order,
             'questionData' => json_decode($q->question_data),
@@ -342,7 +343,7 @@ class LearnerSessionController extends Controller
     // The class learner devices follow: this device's own class while it runs, else the newest running class.
     private function currentSession(Request $request): ?object
     {
-        $running = fn() => DB::table('classroom_sessions')->where('status', 'ongoing');
+        $running = fn () => DB::table('classroom_sessions')->where('status', 'ongoing');
         $stored = $this->stored($request);
         if ($stored && $session = $running()->where('id', $stored['sessionId'])->first()) {
             return $session;

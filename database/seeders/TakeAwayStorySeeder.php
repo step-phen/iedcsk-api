@@ -57,7 +57,7 @@ class TakeAwayStorySeeder extends Seeder
             foreach (self::ROUNDS as $i => [$character, $start, $gone, $choices]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['character' => $character, 'start' => $start, 'gone' => $gone, 'choices' => $choices]),
                     'correct_answer' => json_encode(['answer' => (string) ($start - $gone)]),

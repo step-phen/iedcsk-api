@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 // "Naming Vowel Aa" game for Language, Q1 Week 3 Friday; run with: php artisan db:seed --class=NamingVowelAaSeeder

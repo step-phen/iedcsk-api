@@ -60,7 +60,7 @@ class LongOrShortSeeder extends Seeder
             foreach (self::ROUNDS as $i => [$item, $length]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['item' => $item, 'length' => $length, 'reference' => self::REFERENCE]),
                     'correct_answer' => json_encode(['answer' => $length > self::REFERENCE ? 'longer' : 'shorter']),

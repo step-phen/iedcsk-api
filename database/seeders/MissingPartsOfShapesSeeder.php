@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 // "Missing Parts of Shapes" game for Language, Q1 Week 2 Friday; run with: php artisan db:seed --class=MissingPartsOfShapesSeeder

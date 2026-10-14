@@ -55,7 +55,7 @@ class SortByShapeSeeder extends Seeder
             foreach (self::ITEMS as $i => [$object, $shape]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'item-' . ($i + 1),
+                    'question_key' => 'item-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['object' => $object]),
                     'correct_answer' => json_encode(['answer' => $shape]),

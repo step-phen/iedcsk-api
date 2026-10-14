@@ -54,7 +54,7 @@ class SizeSortingSeeder extends Seeder
             foreach (self::OBJECTS as $i => $object) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['object' => $object]),
                     'correct_answer' => json_encode(['answer' => self::ANSWER]),

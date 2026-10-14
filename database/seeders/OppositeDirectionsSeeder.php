@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 // "Opposite Directions" game for Language, Q1 Week 3 Wednesday; run with: php artisan db:seed --class=OppositeDirectionsSeeder
