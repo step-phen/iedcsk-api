@@ -3,10 +3,11 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 
 /**
- * @property \Illuminate\Support\Carbon|null $start_date
- * @property \Illuminate\Support\Carbon|null $end_date
+ * @property Carbon|null $start_date
+ * @property Carbon|null $end_date
  */
 class Quarter extends Model
 {

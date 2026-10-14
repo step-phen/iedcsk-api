@@ -57,7 +57,7 @@ class NearOrFarSeeder extends Seeder
             foreach (self::ROUNDS as $i => [$landmark, $side, $object, $ask]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['landmark' => $landmark, 'side' => $side, 'object' => $object, 'ask' => $ask]),
                     'correct_answer' => json_encode(['answer' => $ask]),

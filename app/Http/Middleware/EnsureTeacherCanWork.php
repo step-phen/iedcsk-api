@@ -10,7 +10,6 @@ use Symfony\Component\HttpFoundation\Response;
 
 class EnsureTeacherCanWork
 {
-
     // Deactivated teachers lose access at once; an incoming teacher sees only the handover until they accept it.
     public function handle(Request $request, Closure $next): Response
     {

@@ -57,7 +57,7 @@ class WhereIsItSeeder extends Seeder
             foreach (self::ROUNDS as $i => [$container, $object, $ask]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['container' => $container, 'object' => $object, 'ask' => $ask]),
                     'correct_answer' => json_encode(['answer' => $ask]),

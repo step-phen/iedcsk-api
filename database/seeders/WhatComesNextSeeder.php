@@ -58,7 +58,7 @@ class WhatComesNextSeeder extends Seeder
                 $next = end($sequence) + 1;
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['sequence' => $sequence, 'choices' => $choices]),
                     'correct_answer' => json_encode(['answer' => (string) $next]),

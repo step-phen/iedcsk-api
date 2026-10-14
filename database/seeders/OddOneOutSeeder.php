@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 // "Odd One Out" game for Language, Q1 Week 3 Monday; run with: php artisan db:seed --class=OddOneOutSeeder

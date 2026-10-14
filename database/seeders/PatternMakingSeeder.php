@@ -53,7 +53,7 @@ class PatternMakingSeeder extends Seeder
             for ($i = 0; $i < self::BLANKS; $i++) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'blank-' . ($i + 1),
+                    'question_key' => 'blank-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['shapes' => self::SHAPES]),
                     'correct_answer' => json_encode(['answer' => self::SHAPES[$i % 2]]),

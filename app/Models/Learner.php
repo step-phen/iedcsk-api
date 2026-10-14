@@ -5,11 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * @property \Illuminate\Support\Carbon $birth_date
+ * @property Carbon $birth_date
  */
 class Learner extends Model
 {
@@ -45,7 +47,7 @@ class Learner extends Model
     // Row shape for the teacher's learner list; expects latestEnrollment.section loaded.
     public function toListArray(): array
     {
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('public');
 
         return [

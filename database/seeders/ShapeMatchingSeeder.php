@@ -82,7 +82,7 @@ class ShapeMatchingSeeder extends Seeder
                 $choicesWithIds = array_map(fn ($c) => $c + ['id' => $c['shape']], $choices);
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['shape' => $shape, 'reference' => $reference, 'choices' => $choicesWithIds]),
                     'correct_answer' => json_encode(['answer' => $shape]),

@@ -55,7 +55,7 @@ class ShapePuzzleSeeder extends Seeder
             foreach (self::ROUNDS as $i => [$shape, $outlines]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['shape' => $shape, 'outlines' => $outlines]),
                     'correct_answer' => json_encode(['answer' => $shape]),

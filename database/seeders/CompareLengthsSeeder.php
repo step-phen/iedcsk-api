@@ -57,7 +57,7 @@ class CompareLengthsSeeder extends Seeder
             foreach (self::ROUNDS as $i => [$item, $lengths, $ask]) {
                 DB::table('activity_questions')->insert([
                     'activity_id' => $activityId,
-                    'question_key' => 'round-' . ($i + 1),
+                    'question_key' => 'round-'.($i + 1),
                     'question_order' => $i + 1,
                     'question_data' => json_encode(['item' => $item, 'lengths' => $lengths, 'ask' => $ask]),
                     'correct_answer' => json_encode(['answer' => $ask]),

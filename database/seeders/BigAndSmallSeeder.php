@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 // "Big and Small" game for Reading, Q1 Week 2 Monday; run with: php artisan db:seed --class=BigAndSmallSeeder
