@@ -6,7 +6,7 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
-// Shared by the Reading Q3 CVC word games; each subclass names its activity, lesson day and rounds.
+// Shared by the Reading Q3 and Q4 games; each subclass names its activity, lesson day and rounds.
 abstract class ReadingQuarterThreeGameSeeder extends Seeder
 {
     protected const CODE = '';
@@ -20,6 +20,8 @@ abstract class ReadingQuarterThreeGameSeeder extends Seeder
     protected const CHECKLIST_ITEM = '';
 
     protected const GAME_TYPE = 'tap_choice';
+
+    protected const QUARTER = 3;
 
     protected const WEEK = 0;
 
@@ -35,11 +37,11 @@ abstract class ReadingQuarterThreeGameSeeder extends Seeder
         $lessonId = DB::table('lessons')
             ->join('module_domains', 'module_domains.id', '=', 'lessons.module_domain_id')
             ->join('modules', 'modules.id', '=', 'module_domains.module_id')
-            ->where(['modules.code' => 'reading', 'lessons.quarter_number' => 3, 'lessons.week_number' => static::WEEK, 'lessons.day_of_week' => static::DAY, 'lessons.is_active' => true])
+            ->where(['modules.code' => 'reading', 'lessons.quarter_number' => static::QUARTER, 'lessons.week_number' => static::WEEK, 'lessons.day_of_week' => static::DAY, 'lessons.is_active' => true])
             ->orderBy('lessons.sequence_order')
             ->value('lessons.id');
         if (! $lessonId) {
-            throw new RuntimeException('Add the Reading lesson for Quarter 3, Week '.static::WEEK.', '.$days[static::DAY].' first.');
+            throw new RuntimeException('Add the Reading lesson for Quarter '.static::QUARTER.', Week '.static::WEEK.', '.$days[static::DAY].' first.');
         }
 
         DB::transaction(function () use ($lessonId) {
@@ -73,7 +75,7 @@ abstract class ReadingQuarterThreeGameSeeder extends Seeder
             }
 
             $domainId = DB::table('developmental_domains')->where('code', 'reading_language')->value('id');
-            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => 3, 'item' => static::CHECKLIST_ITEM];
+            $item = ['domain_id' => $domainId, 'grade_level' => 'Kindergarten', 'quarter_number' => static::QUARTER, 'item' => static::CHECKLIST_ITEM];
             $existing = DB::table('developmental_checklist_items')->where('activity_id', $activityId)->value('id')
                 ?? DB::table('developmental_checklist_items')->where($item)->value('id');
             if ($existing) {
@@ -81,7 +83,7 @@ abstract class ReadingQuarterThreeGameSeeder extends Seeder
             } else {
                 DB::table('developmental_checklist_items')->insert($item + [
                     'activity_id' => $activityId,
-                    'display_order' => (DB::table('developmental_checklist_items')->where(['domain_id' => $domainId, 'quarter_number' => 3])->max('display_order') ?? 0) + 1,
+                    'display_order' => (DB::table('developmental_checklist_items')->where(['domain_id' => $domainId, 'quarter_number' => static::QUARTER])->max('display_order') ?? 0) + 1,
                 ]);
             }
         });

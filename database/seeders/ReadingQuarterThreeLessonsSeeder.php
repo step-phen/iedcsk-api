@@ -17,6 +17,9 @@ class ReadingQuarterThreeLessonsSeeder extends Seeder
         [2, 1, 1, 'Recognizing the Consonant Tt', 'Learners recognize uppercase and lowercase Tt and connect them with the /t/ sound in familiar words.'],
         [2, 3, 2, 'Recognizing the Consonant Vv', 'Learners recognize uppercase and lowercase Vv and connect them with the /v/ sound in familiar words.'],
         [2, 5, 3, 'Recognizing the Consonant Ww', 'Learners recognize uppercase and lowercase Ww and connect them with the /w/ sound in familiar words.'],
+        [3, 1, 1, 'Recognizing Xx and the Ending /ks/ Sound', 'Learners recognize Xx and hear its /ks/ sound at the end of familiar words such as box and fox.'],
+        [3, 3, 2, 'Recognizing the Consonant Yy', 'Learners recognize uppercase and lowercase Yy and connect them with the /y/ sound in familiar words.'],
+        [3, 5, 3, 'Recognizing the Consonant Zz', 'Learners recognize uppercase and lowercase Zz and connect them with the /z/ sound in familiar words.'],
         [4, 1, 1, 'Blending CVC Words with Short a', 'Learners blend three taught letter sounds to read short-a consonant-vowel-consonant words such as cat and map.'],
         [4, 3, 2, 'Blending CVC Words with Short e', 'Learners blend three taught letter sounds to read short-e consonant-vowel-consonant words such as hen and net.'],
         [4, 5, 3, 'Reviewing Consonants and CVC Blending', 'Learners review Qq-Zz, the ending Xx sound, and taught short-a and short-e CVC words.'],
@@ -26,6 +29,9 @@ class ReadingQuarterThreeLessonsSeeder extends Seeder
         [6, 1, 1, 'Reading Mixed Short-a, Short-e, and Short-i Words', 'Learners blend and distinguish familiar CVC words containing taught short vowels.'],
         [6, 3, 2, 'Matching Beginning and Ending Sounds', 'Learners recognize the first and last consonant sounds in taught CVC words.'],
         [6, 5, 3, 'Reading CVC Words Aloud', 'Learners blend taught letter sounds and say familiar short-a, short-e, and short-i CVC words.'],
+        [7, 1, 1, 'Applying Consonant Sounds in Words', 'Learners connect taught consonants and short vowels with familiar CVC words.'],
+        [7, 3, 2, 'Reviewing Third-Quarter Reading Skills', 'Learners review Qq-Zz, taught consonant sounds, and short-a, short-e, and short-i CVC blending.'],
+        [7, 5, 3, 'Assessing Third-Quarter Reading Skills', 'Learners demonstrate taught consonant recognition and short-a, short-e, and short-i CVC blending.'],
     ];
 
     public function run(): void
