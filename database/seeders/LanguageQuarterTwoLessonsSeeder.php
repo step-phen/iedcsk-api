@@ -14,6 +14,12 @@ class LanguageQuarterTwoLessonsSeeder extends Seeder
         [1, 1, 1, 'Recognizing Vowel Uu', 'Learners recognize Uu after hearing letter names.'],
         [1, 3, 2, 'Recognizing Consonants Bb and Cc', 'Learners recognize Bb, Cc after hearing letter names.'],
         [1, 5, 3, 'Recognizing Consonants Dd and Ff', 'Learners recognize Dd, Ff after hearing letter names.'],
+        [2, 1, 1, 'Recognizing Consonants Gg and Hh', 'Learners recognize Gg, Hh after hearing letter names.'],
+        [2, 3, 2, 'Recognizing Consonants Jj and Kk', 'Learners recognize Jj, Kk after hearing letter names.'],
+        [2, 5, 3, 'Recognizing Consonants Ll and Mm', 'Learners recognize Ll, Mm after hearing letter names.'],
+        [3, 1, 1, 'Recognizing Consonants Nn and Pp', 'Learners recognize Nn, Pp after hearing letter names.'],
+        [3, 3, 2, 'Recognizing Consonants Qq and Rr', 'Learners recognize Qq, Rr after hearing letter names.'],
+        [3, 5, 3, 'Recognizing Consonants Ss and Tt', 'Learners recognize Ss, Tt after hearing letter names.'],
     ];
 
     public function run(): void
