@@ -32,6 +32,8 @@ class SchoolYearController extends Controller
             ? response()->json($year->toApiArray() + [
                 // Shown next to the year in the header, e.g. "SY 2026–2027 · 1st Quarter".
                 'activeQuarter' => Quarter::where('school_year_id', $year->id)->where('status', 'active')->value('name'),
+                // What the Modules page compares its quarter tabs (1-4) against.
+                'activeQuarterNumber' => Quarter::where('school_year_id', $year->id)->where('status', 'active')->value('quarter_number'),
             ])
             : JsonResponse::fromJsonString('null');
     }
@@ -148,6 +150,8 @@ class SchoolYearController extends Controller
         $sections = $request->validated('sections');
 
         DB::transaction(function () use ($schoolYear, $teacher, $sections) {
+            // Switching years changes the active quarter too, so it waits on the same lock (Quarter::lockState).
+            Quarter::lockState();
             $previous = SchoolYear::where('status', 'active')->lockForUpdate()->first();
             if ($sections) {
                 Section::setUp($schoolYear, $teacher, $sections);

@@ -268,4 +268,13 @@ class QuarterTest extends TestCase
         $this->saveAll([$this->q('2027-06-14', '2027-08-31'), $this->q(null, null), $this->q(null, null), $this->q(null, null)], $undated)
             ->assertStatus(422)->assertJsonValidationErrors(['quarters' => "Set the school year's start and end dates first."]);
     }
+
+    public function test_activation_takes_the_quarter_lock(): void
+    {
+        Quarter::create(['school_year_id' => $this->year->id, 'quarter_number' => 1, 'name' => Quarter::NAMES[1], 'start_date' => '2026-06-15', 'end_date' => '2026-09-25', 'status' => 'upcoming']);
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->activate(1)->assertOk();
+        $this->assertFalse($this->quarterLockFree());
+    }
 }

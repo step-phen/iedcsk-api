@@ -112,7 +112,7 @@ class SchoolYearTest extends TestCase
         $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['activeQuarter' => null]);
 
         $this->quarter($current, 1, '2026-06-15', '2026-09-25', 'active');
-        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['activeQuarter' => '1st Quarter']);
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['activeQuarter' => '1st Quarter', 'activeQuarterNumber' => 1]);
     }
 
     public function test_switching_years_returns_an_unfinished_quarter_to_upcoming(): void
@@ -262,7 +262,7 @@ class SchoolYearTest extends TestCase
 
         [$current] = $this->twoYears();
         $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()
-            ->assertExactJson(['schoolYearId' => $current->id, 'name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15', 'status' => 'active', 'sections' => [], 'activeQuarter' => null]);
+            ->assertExactJson(['schoolYearId' => $current->id, 'name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15', 'status' => 'active', 'sections' => [], 'activeQuarter' => null, 'activeQuarterNumber' => null]);
     }
 
     public function test_list_returns_stored_status_even_when_dates_disagree(): void
@@ -600,5 +600,15 @@ class SchoolYearTest extends TestCase
     {
         $this->expectException(QueryException::class);
         SchoolYear::create(['name' => '2028-2029', 'start_date' => '2028-06-01']);
+    }
+
+    public function test_activation_takes_the_quarter_lock(): void
+    {
+        $tina = $this->teacher();
+        [, $next] = $this->twoYears();
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->actingAs($tina)->patchJson("/api/school-years/{$next->id}/activate", self::BOTH)->assertOk();
+        $this->assertFalse($this->quarterLockFree());
     }
 }

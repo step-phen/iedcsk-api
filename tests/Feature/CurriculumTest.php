@@ -61,7 +61,7 @@ class CurriculumTest extends TestCase
         $data = $this->actingAs($tina)->getJson("/api/sections/{$section}/checklist")->assertOk()->json();
         $this->assertEquals([['enrollmentId' => $plaza, 'activityId' => $counting, 'score' => 4, 'maxScore' => 5]], $data['results']);
         $this->assertSame(['Abad', 'Plaza'], array_column($data['learners'], 'lastName'));
-        $this->assertSame([['itemId' => $item, 'item' => 'Counts to 10', 'quarter' => 2, 'activityId' => $counting, 'activityName' => 'Count the Apples']], collect($data['domains'])->firstWhere('domainId', $math)['items']);
+        $this->assertSame([['itemId' => $item, 'item' => 'Counts to 10', 'quarter' => 2, 'activityId' => $counting, 'activityName' => 'Count the Apples', 'hasRecords' => true]], collect($data['domains'])->firstWhere('domainId', $math)['items']);
         $this->assertSame([['enrollmentId' => $plaza, 'itemId' => $item, 'quarter' => 2, 'rating' => 'developing', 'remarks' => null]], $data['ratings']);
         $this->assertSame('2nd Quarter', $data['quarters'][1]['quarterName']);
 
@@ -124,7 +124,7 @@ class CurriculumTest extends TestCase
         // It shows on the section's checklist, and the domain lists the games it can be linked to.
         $domain = collect($this->actingAs($tina)->getJson("/api/sections/{$section}/checklist")->assertOk()->json('domains'))->firstWhere('domainId', $math);
         $this->assertSame(['Counts to 5', 'Writes 1 to 5'], array_column($domain['items'], 'item'));
-        $this->assertSame([['activityId' => $counting, 'name' => 'Count the Apples', 'quarter' => 1]], $domain['activities']);
+        $this->assertSame([['activityId' => $counting, 'name' => 'Count the Apples', 'quarter' => 1, 'hasRecords' => false]], $domain['activities']);
 
         // Editing renames and relinks in place; domain and quarter in the body are ignored.
         $first = $domain['items'][0]['itemId'];
@@ -392,5 +392,305 @@ class CurriculumTest extends TestCase
         $this->assertNull(DB::table('developmental_checklist_items')->where('id', $skill)->value('activity_id'));
         $this->assertSame(['Jump', 'Game'], array_column($this->actingAs($tina)->getJson('/api/modules/'.DB::table('module_domains')->value('module_id').'/lessons?quarter=1&week=1')->json('0.activities'), 'activityName'));
         $this->actingAs($tina)->deleteJson("/api/practical-activities/{$id}")->assertNotFound();
+    }
+
+    /**
+     * An active 2026-2027 with Q2 open for classes, and one Reading lesson in Q1 and in Q2.
+     *
+     * @return array{Teacher, int, int, int, int} teacher, Reading module, its domain, Q1 lesson, Q2 lesson
+     */
+    private function quarterTwoActive(): array
+    {
+        $this->seed(CurriculumSeeder::class);
+        $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
+        foreach ([1 => 'upcoming', 2 => 'active'] as $number => $status) {
+            DB::table('quarters')->insert(['school_year_id' => $year->id, 'quarter_number' => $number, 'name' => "Q{$number}", 'start_date' => '2026-06-01', 'end_date' => '2026-12-31', 'status' => $status]);
+        }
+        $reading = DB::table('modules')->where('code', 'reading')->value('id');
+        $domain = DB::table('module_domains')->where('module_id', $reading)->value('id');
+        $lesson = fn (int $quarter) => DB::table('lessons')->insertGetId(['module_domain_id' => $domain, 'title' => "Lesson Q{$quarter}", 'quarter_number' => $quarter, 'week_number' => 1, 'day_of_week' => 1, 'sequence_order' => 1]);
+
+        return [Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']), $reading, $domain, $lesson(1), $lesson(2)];
+    }
+
+    private function practical(int $lesson, string $name): int
+    {
+        $id = DB::table('activities')->insertGetId(['lesson_id' => $lesson, 'activity_code' => "PR-{$name}", 'name' => $name, 'instructions' => '-', 'activity_format' => 'practical', 'sequence_order' => 1]);
+        DB::table('practical_activity_details')->insert(['activity_id' => $id, 'teacher_guidelines' => '-']);
+
+        return $id;
+    }
+
+    public function test_active_quarter_lessons_and_practical_activities_are_read_only(): void
+    {
+        [$tina, $reading, $domain, $q1, $q2] = $this->quarterTwoActive();
+        $disk = Storage::fake('public');
+        $disk->put('lesson-videos/old.mp4', 'x');
+        $q2Video = DB::table('lessons')->insertGetId(['module_domain_id' => $domain, 'title' => 'With video', 'quarter_number' => 2, 'week_number' => 1, 'day_of_week' => 3, 'sequence_order' => 1, 'lesson_video_url' => 'lesson-videos/old.mp4']);
+        $hop = $this->practical($q2, 'Hop');
+        $digital = DB::table('activities')->insertGetId(['lesson_id' => $q2, 'activity_code' => 'DG-1', 'name' => 'Game', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 2]);
+        $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+        $locked = ['quarter' => 'The 2nd Quarter is open for classes'];
+        $as = $this->actingAs($tina);
+
+        // Q2 is open for classes: nothing in it can be added, changed or removed.
+        $lessonCount = DB::table('lessons')->count();
+        $as->post("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'New', 'quarter' => 2, 'week' => 2, 'day' => 1, 'video' => $video()], ['Accept' => 'application/json'])
+            ->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->patchJson("/api/lessons/{$q2}", ['title' => 'Renamed', 'description' => 'Changed'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->post("/api/lessons/{$q2}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->deleteJson("/api/lessons/{$q2Video}/video")->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->post("/api/lessons/{$q2}/practical-activities", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->post("/api/practical-activities/{$hop}", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->deleteJson("/api/practical-activities/{$hop}")->assertStatus(422)->assertJsonValidationErrors($locked);
+
+        $this->assertSame($lessonCount, DB::table('lessons')->count());
+        $this->assertSame(['Lesson Q2', null], [DB::table('lessons')->where('id', $q2)->value('title'), DB::table('lessons')->where('id', $q2)->value('description')]);
+        $this->assertSame('lesson-videos/old.mp4', DB::table('lessons')->where('id', $q2Video)->value('lesson_video_url'));
+        $this->assertSame(['Hop', true], [DB::table('activities')->where('id', $hop)->value('name'), (bool) DB::table('activities')->where('id', $hop)->value('is_active')]);
+        $this->assertSame(1, DB::table('activities')->where('lesson_id', $q2)->where('activity_format', 'practical')->count());
+        // Rejected uploads leave no file behind, and the existing video stays.
+        $this->assertSame(['lesson-videos/old.mp4'], $disk->allFiles());
+
+        // Digital activities still can't be edited at all.
+        $as->post("/api/practical-activities/{$digital}", $payload, ['Accept' => 'application/json'])->assertNotFound();
+        $as->deleteJson("/api/practical-activities/{$digital}")->assertNotFound();
+
+        // Q1 isn't active, so the teacher prepares it freely.
+        $as->postJson("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'New', 'quarter' => 1, 'week' => 2, 'day' => 1])->assertCreated();
+        $as->patchJson("/api/lessons/{$q1}", ['title' => 'Renamed'])->assertOk();
+        $as->post("/api/lessons/{$q1}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertOk();
+        $as->deleteJson("/api/lessons/{$q1}/video")->assertOk();
+        $jump = $as->postJson("/api/lessons/{$q1}/practical-activities", $payload)->assertCreated()->json('id');
+        $as->postJson("/api/practical-activities/{$jump}", ['name' => 'Jump high'] + $payload)->assertOk();
+        $as->deleteJson("/api/practical-activities/{$jump}")->assertOk();
+    }
+
+    public function test_a_lesson_or_activity_cannot_be_moved_into_or_out_of_the_active_quarter(): void
+    {
+        [$tina, $reading, $domain, $q1, $q2] = $this->quarterTwoActive();
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+        $as = $this->actingAs($tina);
+
+        // Out of Q2: still locked, and it stays in Q2.
+        $as->patchJson("/api/lessons/{$q2}", ['title' => 'Moved', 'quarter' => 1, 'quarterId' => 1, 'quarter_number' => 1])->assertStatus(422)->assertJsonValidationErrors('quarter');
+        $this->assertSame(2, (int) DB::table('lessons')->where('id', $q2)->value('quarter_number'));
+
+        // Into Q2: a quarter in the body is ignored, so the Q1 lesson saves but stays in Q1.
+        $as->patchJson("/api/lessons/{$q1}", ['title' => 'Renamed', 'quarter' => 2, 'quarterId' => 2, 'quarter_number' => 2])->assertOk();
+        $this->assertSame(['Renamed', 1], [DB::table('lessons')->where('id', $q1)->value('title'), (int) DB::table('lessons')->where('id', $q1)->value('quarter_number')]);
+
+        // A new lesson can't land in Q2 either.
+        $as->postJson("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'New', 'quarter' => 2, 'week' => 1, 'day' => 1])->assertStatus(422)->assertJsonValidationErrors('quarter');
+
+        // A practical activity keeps its lesson: Q1's can't be re-pointed at a Q2 lesson, and Q2's can't leave.
+        $q1Hop = $this->practical($q1, 'Hop');
+        $q2Hop = $this->practical($q2, 'Skip');
+        $as->postJson("/api/practical-activities/{$q1Hop}", $payload + ['lessonId' => $q2, 'lesson_id' => $q2])->assertOk();
+        $this->assertSame($q1, DB::table('activities')->where('id', $q1Hop)->value('lesson_id'));
+        $as->postJson("/api/practical-activities/{$q2Hop}", $payload + ['lessonId' => $q1, 'lesson_id' => $q1])->assertStatus(422)->assertJsonValidationErrors('quarter');
+        $this->assertSame($q2, DB::table('activities')->where('id', $q2Hop)->value('lesson_id'));
+    }
+
+    public function test_an_open_edit_is_rejected_once_its_quarter_is_activated(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+        $year = SchoolYear::active();
+
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'Before'])->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/quarters/1/activate")->assertOk();
+        // The same form saved again after activation is checked against the new state.
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'After'])->assertStatus(422)->assertJsonValidationErrors(['quarter' => 'The 1st Quarter']);
+        $this->assertSame('Before', DB::table('lessons')->where('id', $q1)->value('title'));
+        // Q2 is no longer active, so it opens up.
+        $this->actingAs($tina)->patchJson('/api/lessons/'.DB::table('lessons')->where('quarter_number', 2)->value('id'), ['title' => 'Now editable'])->assertOk();
+    }
+
+    public function test_lesson_edits_take_the_quarter_lock(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'Renamed'])->assertOk();
+        $this->assertFalse($this->quarterLockFree());
+    }
+
+    public function test_practical_activity_deletes_take_the_quarter_lock(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+        $hop = $this->practical($q1, 'Hop');
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->actingAs($tina)->deleteJson("/api/practical-activities/{$hop}")->assertOk();
+        $this->assertFalse($this->quarterLockFree());
+    }
+
+    /**
+     * A finished 2025-2026 with one enrolled learner in an old section, who played $activity there and was rated.
+     *
+     * @return array{int, int} the old enrollment and its Q1 quarter
+     */
+    private function oldYearRecord(int $activity, Teacher $teacher): array
+    {
+        $old = SchoolYear::create(['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-03-31', 'status' => 'completed']);
+        $quarter = DB::table('quarters')->insertGetId(['school_year_id' => $old->id, 'quarter_number' => 1, 'name' => 'Q1', 'start_date' => '2025-06-01', 'end_date' => '2025-08-31', 'status' => 'completed']);
+        $section = DB::table('sections')->insertGetId(['school_year_id' => $old->id, 'teacher_id' => $teacher->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);
+        $enrollment = DB::table('learner_school_years')->insertGetId([
+            'learner_id' => DB::table('learners')->insertGetId(['first_name' => 'Old', 'last_name' => 'Timer', 'birth_date' => '2020-01-01']),
+            'school_year_id' => $old->id, 'section_id' => $section, 'enrolled_on' => '2025-06-01', 'status' => 'completed',
+        ]);
+        $assignment = DB::table('learner_activity_assignments')->insertGetId([
+            'enrollment_id' => $enrollment, 'activity_id' => $activity, 'quarter_id' => $quarter, 'teacher_id' => $teacher->id,
+            'assigned_at' => '2025-07-01 08:00', 'status' => 'completed', 'completed_at' => '2025-07-01 09:00',
+        ]);
+        DB::table('learner_activity_attempts')->insert([
+            'assignment_id' => $assignment, 'attempt_number' => 1, 'status' => 'evaluated', 'practical_rating' => 'good',
+            'evaluated_by' => $teacher->id, 'started_at' => '2025-07-01 08:00', 'evaluated_at' => '2025-07-01 09:00',
+        ]);
+
+        return [$enrollment, $quarter];
+    }
+
+    // Every row a protected lesson, practical activity or checklist item and its learner records are made of.
+    private function recordSnapshot(array $lessons, array $activities, array $items): array
+    {
+        return [
+            DB::table('lessons')->whereIn('id', $lessons)->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('activities')->whereIn('id', $activities)->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('practical_activity_details')->whereIn('activity_id', $activities)->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('developmental_checklist_items')->whereIn('id', $items)->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('learner_activity_assignments')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('learner_activity_attempts')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('learner_developmental_checklists')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+        ];
+    }
+
+    public function test_content_with_records_stays_protected_while_unused_content_stays_editable(): void
+    {
+        [$tina, $reading, $domain, $used, $q2] = $this->quarterTwoActive();
+        $joy = $this->setUpSections($tina, ['Joy'])['Joy'];
+        $disk = Storage::fake('public');
+        $disk->put('practical-demos/hop.mp4', 'x');
+        $skillDomain = DB::table('module_domains')->where('id', $domain)->value('domain_id');
+        $free = DB::table('lessons')->insertGetId(['module_domain_id' => $domain, 'title' => 'Free', 'quarter_number' => 1, 'week_number' => 1, 'day_of_week' => 3, 'sequence_order' => 1]);
+        $hop = $this->practical($used, 'Hop');
+        DB::table('practical_activity_details')->where('activity_id', $hop)->update(['demo_video_url' => 'practical-demos/hop.mp4']);
+        $skip = $this->practical($free, 'Skip');
+        [$oldEnrollment, $oldQuarter] = $this->oldYearRecord($hop, $tina);
+        $item = fn (string $name, ?int $activity) => DB::table('developmental_checklist_items')->insertGetId(['domain_id' => $skillDomain, 'item' => $name, 'grade_level' => 'Kindergarten', 'quarter_number' => 1, 'activity_id' => $activity, 'display_order' => 1]);
+        $linked = $item('Hops', $hop);
+        $rated = $item('Balances', null);
+        $plain = $item('Skips', null);
+        DB::table('learner_developmental_checklists')->insert(['enrollment_id' => $oldEnrollment, 'checklist_item_id' => $rated, 'quarter_id' => $oldQuarter, 'teacher_id' => $tina->id, 'rating' => 'achieved', 'assessed_at' => '2025-07-02']);
+
+        $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+        $protected = ['protected' => 'This content has classroom or learner records and can no longer be changed.'];
+        $as = $this->actingAs($tina);
+        $before = $this->recordSnapshot([$used], [$hop], [$linked, $rated]);
+
+        // The API says which content has records, so the board and checklist can lock just those.
+        $board = collect($as->getJson('/api/modules')->json())->firstWhere('id', $reading)['lessons'];
+        $this->assertSame([$used => true, $free => false, $q2 => false], collect($board)->whereIn('id', [$used, $free, $q2])->pluck('hasRecords', 'id')->all());
+        $week = collect($as->getJson("/api/modules/{$reading}/lessons?quarter=1&week=1")->json());
+        $this->assertSame([$used => true, $free => false], $week->pluck('hasRecords', 'lessonId')->all());
+        $this->assertSame([$hop => true, $skip => false], $week->pluck('activities')->collapse()->pluck('hasRecords', 'id')->all());
+        $checklist = collect($as->getJson("/api/sections/{$joy}/checklist")->json('domains'))->firstWhere('domainId', $skillDomain);
+        $this->assertSame([$linked => true, $rated => true, $plain => false], collect($checklist['items'])->pluck('hasRecords', 'itemId')->all());
+        $this->assertTrue(collect($checklist['activities'])->firstWhere('activityId', $hop)['hasRecords']);
+
+        // Played in an old year's section, Q1 isn't active, and still: nothing about that content changes.
+        $as->patchJson("/api/lessons/{$used}", ['title' => 'Renamed', 'description' => 'New'])->assertStatus(422)->assertJsonValidationErrors($protected);
+        $as->patchJson("/api/lessons/{$used}", ['title' => 'Moved', 'quarter' => 3, 'quarterId' => 3, 'week' => 4])->assertStatus(422)->assertJsonValidationErrors('protected');
+        $as->post("/api/lessons/{$used}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($protected);
+        $as->deleteJson("/api/lessons/{$used}/video")->assertStatus(422)->assertJsonValidationErrors($protected);
+        $as->post("/api/practical-activities/{$hop}", $payload + ['video' => $video(), 'lessonId' => $free], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($protected);
+        $as->deleteJson("/api/practical-activities/{$hop}")->assertStatus(422)->assertJsonValidationErrors($protected);
+        $as->putJson("/api/checklist-items/{$linked}", ['item' => 'Hops far', 'activityId' => null])->assertStatus(422)->assertJsonValidationErrors($protected);
+        $as->putJson("/api/checklist-items/{$rated}", ['item' => 'Balances long'])->assertStatus(422)->assertJsonValidationErrors($protected);
+
+        // Rows, links and learner records are untouched; the old demo stays and rejected uploads left nothing behind.
+        $this->assertEquals($before, $this->recordSnapshot([$used], [$hop], [$linked, $rated]));
+        $this->assertSame(['practical-demos/hop.mp4'], $disk->allFiles());
+
+        // The rest of Q1 is still being prepared: only content with records is locked.
+        $as->patchJson("/api/lessons/{$free}", ['title' => 'Free renamed'])->assertOk();
+        $as->post("/api/lessons/{$free}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertOk();
+        $as->deleteJson("/api/lessons/{$free}/video")->assertOk();
+        $as->postJson("/api/practical-activities/{$skip}", ['name' => 'Skip rope'] + $payload)->assertOk();
+        $as->deleteJson("/api/practical-activities/{$skip}")->assertOk();
+        $as->putJson("/api/checklist-items/{$plain}", ['item' => 'Skips twice'])->assertOk()->assertJson(['hasRecords' => false]);
+
+        // New content can join a used lesson's week and the used lesson itself, without touching what's protected.
+        $as->postJson("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'Next', 'quarter' => 1, 'week' => 1, 'day' => 5])->assertCreated()->assertJson(['hasRecords' => false]);
+        $as->postJson("/api/lessons/{$used}/practical-activities", $payload)->assertCreated()->assertJson(['hasRecords' => false]);
+        $as->postJson('/api/checklist-items', ['domainId' => $skillDomain, 'quarter' => 1, 'item' => 'Jumps'])->assertCreated();
+        $this->assertEquals($before, $this->recordSnapshot([$used], [$hop], [$linked, $rated]));
+
+        // In the active quarter its own reason comes first, records or not.
+        DB::table('learner_activity_assignments')->insert(['enrollment_id' => $oldEnrollment, 'activity_id' => $this->practical($q2, 'Q2 game'), 'quarter_id' => $oldQuarter, 'teacher_id' => $tina->id, 'assigned_at' => '2025-07-03 08:00', 'status' => 'assigned']);
+        $as->patchJson("/api/lessons/{$q2}", ['title' => 'x'])->assertStatus(422)->assertJsonValidationErrors('quarter')->assertJsonMissingValidationErrors('protected');
+    }
+
+    public function test_a_skill_cannot_be_linked_to_an_activity_with_records(): void
+    {
+        [$tina, , $domain, $used] = $this->quarterTwoActive();
+        $skillDomain = DB::table('module_domains')->where('id', $domain)->value('domain_id');
+        $hop = $this->practical($used, 'Hop');
+        $skip = $this->practical($used, 'Skip');
+        $this->oldYearRecord($hop, $tina);
+        $add = fn (array $body) => $this->actingAs($tina)->postJson('/api/checklist-items', $body + ['domainId' => $skillDomain, 'quarter' => 1]);
+        $linkError = ['activityId' => 'linking a skill to it would change past results and reports'];
+
+        // Its old results would become this skill's evidence on the checklist and in progress reports.
+        $add(['item' => 'Hops', 'activityId' => $hop])->assertStatus(422)->assertJsonValidationErrors($linkError);
+        $this->assertSame(0, DB::table('developmental_checklist_items')->count());
+
+        $unlinked = $add(['item' => 'Hops'])->assertCreated()->json('itemId');
+        $add(['item' => 'Skips', 'activityId' => $skip])->assertCreated();
+        $this->actingAs($tina)->putJson("/api/checklist-items/{$unlinked}", ['item' => 'Hops', 'activityId' => $hop])->assertStatus(422)->assertJsonValidationErrors($linkError);
+        $this->assertNull(DB::table('developmental_checklist_items')->where('id', $unlinked)->value('activity_id'));
+    }
+
+    public function test_content_used_after_a_form_opened_is_protected_on_save(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+        $hop = $this->practical($q1, 'Hop');
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'Before'])->assertOk();
+        $this->actingAs($tina)->postJson("/api/practical-activities/{$hop}", $payload)->assertOk();
+        // A learner record lands while the teacher's edit forms are still open.
+        $this->oldYearRecord($hop, $tina);
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'After'])->assertStatus(422)->assertJsonValidationErrors('protected');
+        $this->actingAs($tina)->postJson("/api/practical-activities/{$hop}", ['name' => 'Changed'] + $payload)->assertStatus(422)->assertJsonValidationErrors('protected');
+        $this->assertSame(['Before', 'Jump'], [DB::table('lessons')->where('id', $q1)->value('title'), DB::table('activities')->where('id', $hop)->value('name')]);
+    }
+
+    public function test_checklist_item_edits_take_the_quarter_lock(): void
+    {
+        [$tina, , $domain] = $this->quarterTwoActive();
+        $id = DB::table('developmental_checklist_items')->insertGetId(['domain_id' => DB::table('module_domains')->where('id', $domain)->value('domain_id'), 'item' => 'Hops', 'grade_level' => 'Kindergarten', 'quarter_number' => 1, 'display_order' => 1]);
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->actingAs($tina)->putJson("/api/checklist-items/{$id}", ['item' => 'Hops far'])->assertOk();
+        $this->assertFalse($this->quarterLockFree());
+    }
+
+    public function test_checklist_ratings_take_the_quarter_lock(): void
+    {
+        [$tina, , $domain] = $this->quarterTwoActive();
+        $joy = $this->setUpSections($tina, ['Joy'])['Joy'];
+        $year = SchoolYear::active();
+        $enrollment = DB::table('learner_school_years')->insertGetId([
+            'learner_id' => DB::table('learners')->insertGetId(['first_name' => 'Ana', 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']),
+            'school_year_id' => $year->id, 'section_id' => $joy, 'enrolled_on' => '2026-06-01', 'status' => 'active',
+        ]);
+        $id = DB::table('developmental_checklist_items')->insertGetId(['domain_id' => DB::table('module_domains')->where('id', $domain)->value('domain_id'), 'item' => 'Hops', 'grade_level' => 'Kindergarten', 'quarter_number' => 1, 'display_order' => 1]);
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->actingAs($tina)->putJson("/api/sections/{$joy}/checklist/ratings", ['enrollmentId' => $enrollment, 'quarter' => 1, 'itemId' => $id, 'rating' => 'achieved'])->assertOk();
+        $this->assertFalse($this->quarterLockFree());
     }
 }

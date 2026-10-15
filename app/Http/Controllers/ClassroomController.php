@@ -6,6 +6,7 @@ use App\Http\Requests\PracticalRatingRequest;
 use App\Http\Requests\SaveAttendanceRequest;
 use App\Http\Requests\StartClassRequest;
 use App\Models\Learner;
+use App\Models\Quarter;
 use App\Models\Section;
 use App\Models\Teacher;
 use App\Support\ClassSession;
@@ -60,12 +61,20 @@ class ClassroomController extends Controller
         if (! $sectionModule) {
             throw ValidationException::withMessages(['moduleId' => 'This module is not part of the section.']);
         }
-        $quarterId = DB::table('quarters')->where(['school_year_id' => $section->school_year_id, 'status' => 'active'])->value('id');
-        if (! $quarterId) {
-            throw ValidationException::withMessages(['activityId' => 'Set an active quarter in Settings first.']);
-        }
 
-        $sessionId = DB::transaction(function () use ($teacher, $section, $sectionModule, $quarterId, $data) {
+        $sessionId = DB::transaction(function () use ($teacher, $section, $sectionModule, $data) {
+            // Read under the quarter lock, so a quarter switched mid-request can't start or keep a class.
+            Quarter::lockState();
+            $quarter = DB::table('quarters')->where(['school_year_id' => $section->school_year_id, 'status' => 'active'])->first(['id', 'quarter_number']);
+            if (! $quarter) {
+                throw ValidationException::withMessages(['activityId' => 'Set an active quarter in Settings first.']);
+            }
+            // Only the active quarter's lessons run in class; the others are being prepared.
+            if ((int) DB::table('lessons')->where('id', $data['lessonId'])->value('quarter_number') !== (int) $quarter->quarter_number) {
+                throw ValidationException::withMessages(['lessonId' => "This lesson isn't in the active quarter, so it can't be used in class."]);
+            }
+            $quarterId = $quarter->id;
+
             $open = $this->openSession($teacher, lock: true);
             if ($open && $open->section_id !== $section->id) {
                 $name = DB::table('sections')->where('id', $open->section_id)->value('name');

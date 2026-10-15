@@ -293,4 +293,105 @@ class ClassroomSessionTest extends TestCase
         $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
         $this->getJson("/api/classroom-session/practical-result?activityId={$hop}")->assertExactJson(['rated' => true, 'result' => 'good']);
     }
+
+    public function test_the_modules_board_badge_follows_a_real_class(): void
+    {
+        $this->quarter();
+        $game = $this->activity('RD-Q1W1-01', 'digital');
+        $hop = $this->activity('RD-Q1W1-02', 'practical');
+        // Only Ana stays enrolled, so she alone decides the count.
+        DB::table('learner_school_years')->whereIn('learner_id', [$this->kids['Ben'], $this->kids['Cara']])->update(['status' => 'withdrawn']);
+        $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/attendance", ['entries' => [['learnerId' => $this->kids['Ana'], 'status' => 'PRESENT']]])->assertOk();
+        $badge = fn () => collect($this->actingAs($this->tina)->getJson("/api/modules?section={$this->joy}")->assertOk()->json())
+            ->flatMap(fn ($m) => $m['lessons'])->firstWhere('id', $this->lesson)['completion'];
+
+        $this->assertSame(['status' => null, 'completed' => 0, 'total' => 1], $badge());
+        // Putting the lesson on screen starts it.
+        $this->start($game)->assertOk();
+        $this->assertSame(['status' => 'in_progress', 'completed' => 0, 'total' => 1], $badge());
+
+        $this->device()->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $this->postJson('/api/classroom-session/finish', ['activityId' => $game, 'answers' => [['questionId' => 'q1', 'response' => 'x']]])->assertOk();
+        // The game is finished with a score of 0, but the practical is still owed.
+        $this->assertSame(['status' => 'in_progress', 'completed' => 0, 'total' => 1], $badge());
+
+        // Ending the class closes only the game it showed; the practical was never taught.
+        $this->actingAs($this->tina)->postJson("/api/sections/{$this->joy}/classroom/end")->assertOk();
+        $this->assertSame(['status' => 'in_progress', 'completed' => 0, 'total' => 1], $badge());
+
+        // A later class teaches the practical: rating Ana completes her, ending the class completes the lesson.
+        $this->start($hop)->assertOk();
+        $this->device()->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $this->postJson('/api/classroom-session/demonstration', ['activityId' => $hop])->assertOk();
+        $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/classroom/practical-rating", ['learnerId' => $this->kids['Ana'], 'activityId' => $hop, 'result' => 'needs_help'])->assertOk();
+        $this->assertSame(['status' => 'in_progress', 'completed' => 1, 'total' => 1], $badge());
+        $this->actingAs($this->tina)->postJson("/api/sections/{$this->joy}/classroom/end")->assertOk();
+        $this->assertSame(['status' => 'done', 'completed' => 1, 'total' => 1], $badge());
+    }
+
+    private function markEveryonePresent(): void
+    {
+        $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/attendance", ['entries' => array_map(
+            fn (int $id) => ['learnerId' => $id, 'status' => 'PRESENT'], array_values($this->kids),
+        )])->assertOk();
+    }
+
+    public function test_only_the_active_quarters_lessons_can_start_or_switch_a_class(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $game = $this->activity('RD-Q1W1-01', 'digital');
+        $q2Lesson = DB::table('lessons')->insertGetId(['module_domain_id' => DB::table('module_domains')->where('module_id', $this->reading())->value('id'), 'title' => 'Letter C', 'quarter_number' => 2, 'week_number' => 1, 'day_of_week' => 1, 'sequence_order' => 1]);
+        $q2Game = DB::table('activities')->insertGetId(['lesson_id' => $q2Lesson, 'activity_code' => 'RD-Q2W1-01', 'name' => 'Q2 game', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 1]);
+        $startQ2 = fn () => $this->actingAs($this->tina)->postJson("/api/sections/{$this->joy}/classroom/start", ['moduleId' => $this->reading(), 'lessonId' => $q2Lesson, 'activityId' => $q2Game]);
+
+        // Q2 is locked: no class starts on it.
+        $startQ2()->assertStatus(422)->assertJsonValidationErrors(['lessonId' => "isn't in the active quarter"]);
+        $this->assertSame(0, DB::table('classroom_sessions')->count());
+
+        // A running Q1 class can't be switched to it either.
+        $this->start($game)->assertOk();
+        $startQ2()->assertStatus(422)->assertJsonValidationErrors('lessonId');
+        $this->assertSame([$this->lesson], DB::table('classroom_session_lessons')->pluck('lesson_id')->all());
+    }
+
+    public function test_class_start_takes_the_quarter_lock(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $game = $this->activity('RD-Q1W1-01', 'digital');
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->start($game)->assertOk();
+        $this->assertFalse($this->quarterLockFree());
+    }
+
+    public function test_a_lesson_taught_in_class_stays_protected_after_the_quarter_changes(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $hop = $this->activity('RD-Q1W1-01', 'practical');
+        $readingDomain = DB::table('module_domains')->where('module_id', $this->reading())->value('id');
+        $other = DB::table('lessons')->insertGetId(['module_domain_id' => $readingDomain, 'title' => 'Letter C', 'quarter_number' => 1, 'week_number' => 1, 'day_of_week' => 3, 'sequence_order' => 1]);
+        $payload = ['name' => 'Hop', 'description' => 'Hopping.', 'instructions' => 'Hop twice.', 'teacherGuidelines' => 'Two hops.'];
+
+        // Taught once, then the class ends and Q2 takes over.
+        $this->start($hop)->assertOk();
+        $this->actingAs($this->tina)->postJson("/api/sections/{$this->joy}/classroom/end")->assertOk();
+        $year = DB::table('school_years')->value('id');
+        DB::table('quarters')->insert(['school_year_id' => $year, 'quarter_number' => 2, 'name' => '2nd Quarter', 'start_date' => '2027-01-01', 'end_date' => '2027-03-31', 'status' => 'upcoming']);
+        $this->actingAs($this->tina)->patchJson("/api/school-years/{$year}/quarters/2/activate")->assertOk();
+
+        // Q1 is no longer active, but what was taught stays as it was; untaught Q1 lessons open up.
+        $this->actingAs($this->tina)->patchJson("/api/lessons/{$this->lesson}", ['title' => 'Renamed'])->assertStatus(422)->assertJsonValidationErrors('protected');
+        $this->actingAs($this->tina)->postJson("/api/practical-activities/{$hop}", $payload)->assertStatus(422)->assertJsonValidationErrors('protected');
+        $this->actingAs($this->tina)->deleteJson("/api/practical-activities/{$hop}")->assertStatus(422)->assertJsonValidationErrors('protected');
+        $this->actingAs($this->tina)->patchJson("/api/lessons/{$other}", ['title' => 'Letter C, again'])->assertOk();
+        $this->assertSame(['Letter B', 'RD-Q1W1-01', true], [
+            DB::table('lessons')->where('id', $this->lesson)->value('title'),
+            DB::table('activities')->where('id', $hop)->value('name'),
+            (bool) DB::table('activities')->where('id', $hop)->value('is_active'),
+        ]);
+    }
 }
