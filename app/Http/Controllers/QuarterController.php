@@ -158,6 +158,8 @@ class QuarterController extends Controller
         $quarter = Quarter::where('school_year_id', $schoolYear->id)->where('quarter_number', $number)->firstOrFail();
 
         DB::transaction(function () use ($schoolYear, $quarter) {
+            // Taken first, as every write that depends on the active quarter does (Quarter::lockState).
+            Quarter::lockState();
             // Checked under the year's row lock, which school year activation also takes, so a
             // year switch can't slip in between the check and the update.
             if (SchoolYear::whereKey($schoolYear->id)->lockForUpdate()->value('status') !== 'active') {

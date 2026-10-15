@@ -9,12 +9,14 @@ use App\Http\Requests\StoreLessonRequest;
 use App\Http\Requests\StoreLessonVideoRequest;
 use App\Http\Requests\StoreModuleRequest;
 use App\Http\Requests\UpdateLessonRequest;
+use App\Models\Quarter;
 use App\Models\SchoolYear;
 use App\Models\Teacher;
 use Illuminate\Container\Attributes\CurrentUser;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -71,6 +73,9 @@ class CurriculumController extends Controller
             ->whereIn('learner_developmental_checklists.enrollment_id', $learners->pluck('enrollment_id'))
             ->get(['learner_developmental_checklists.enrollment_id', 'learner_developmental_checklists.checklist_item_id', 'quarters.quarter_number', 'learner_developmental_checklists.rating', 'learner_developmental_checklists.remarks']);
 
+        $recordedItems = array_flip($this->checklistItemsWithRecords($items->collapse()->pluck('id')->all()));
+        $recordedActivities = array_flip($this->activitiesWithRecords($activities->collapse()->pluck('id')->all()));
+
         // Each linked game's latest result, so the teacher rates the skill from what the learner actually did.
         $results = ClassroomRecordController::latestResults($learners->pluck('enrollment_id'), $items->collapse()->pluck('activity_id')->filter()->unique()->values());
 
@@ -80,8 +85,8 @@ class CurriculumController extends Controller
                 ->map(fn ($d) => [
                     'domainId' => $d->id,
                     'domainName' => $d->name,
-                    'items' => ($items[$d->id] ?? collect())->map(fn ($i) => ['itemId' => $i->id, 'item' => $i->item, 'quarter' => $i->quarter_number, 'activityId' => $i->activity_id, 'activityName' => $i->activity_name])->values(),
-                    'activities' => ($activities[$d->id] ?? collect())->map(fn ($a) => ['activityId' => $a->id, 'name' => $a->name, 'quarter' => $a->quarter_number])->values(),
+                    'items' => ($items[$d->id] ?? collect())->map(fn ($i) => ['itemId' => $i->id, 'item' => $i->item, 'quarter' => $i->quarter_number, 'activityId' => $i->activity_id, 'activityName' => $i->activity_name, 'hasRecords' => isset($recordedItems[$i->id])])->values(),
+                    'activities' => ($activities[$d->id] ?? collect())->map(fn ($a) => ['activityId' => $a->id, 'name' => $a->name, 'quarter' => $a->quarter_number, 'hasRecords' => isset($recordedActivities[$a->id])])->values(),
                 ]),
             'learners' => $learners->map(fn ($l) => [
                 'enrollmentId' => $l->enrollment_id,
@@ -106,11 +111,16 @@ class CurriculumController extends Controller
     {
         $data = $request->validated();
         $where = ['domain_id' => $data['domainId'], 'grade_level' => self::GRADE_LEVEL, 'quarter_number' => $data['quarter']];
-        $id = DB::table('developmental_checklist_items')->insertGetId($where + [
-            'item' => trim($data['item']),
-            'activity_id' => $data['activityId'] ?? null,
-            'display_order' => (DB::table('developmental_checklist_items')->where($where)->max('display_order') ?? 0) + 1,
-        ]);
+        $id = DB::transaction(function () use ($where, $data) {
+            Quarter::lockState();
+            $this->ensureLinkable($data['activityId'] ?? null);
+
+            return DB::table('developmental_checklist_items')->insertGetId($where + [
+                'item' => trim($data['item']),
+                'activity_id' => $data['activityId'] ?? null,
+                'display_order' => (DB::table('developmental_checklist_items')->where($where)->max('display_order') ?? 0) + 1,
+            ]);
+        });
 
         return response()->json($this->checklistItem($id), 201);
     }
@@ -119,11 +129,17 @@ class CurriculumController extends Controller
     public function updateChecklistItem(SaveChecklistItemRequest $request, int $item): JsonResponse
     {
         $data = $request->validated();
-        DB::table('developmental_checklist_items')->where('id', $item)->update([
-            'item' => trim($data['item']),
-            'activity_id' => $data['activityId'] ?? null,
-            'updated_at' => now(),
-        ]);
+        DB::transaction(function () use ($item, $data) {
+            Quarter::lockState();
+            // Rated, or linked to a game learners already played: its wording and link now explain past results.
+            $this->ensureNoRecords(in_array($item, $this->checklistItemsWithRecords([$item]), true));
+            $this->ensureLinkable($data['activityId'] ?? null);
+            DB::table('developmental_checklist_items')->where('id', $item)->update([
+                'item' => trim($data['item']),
+                'activity_id' => $data['activityId'] ?? null,
+                'updated_at' => now(),
+            ]);
+        });
 
         return response()->json($this->checklistItem($item));
     }
@@ -135,7 +151,7 @@ class CurriculumController extends Controller
             ->where('developmental_checklist_items.id', $id)
             ->first(['developmental_checklist_items.id', 'developmental_checklist_items.item', 'developmental_checklist_items.quarter_number', 'developmental_checklist_items.activity_id', 'activities.name as activity_name']);
 
-        return ['itemId' => $i->id, 'item' => $i->item, 'quarter' => $i->quarter_number, 'activityId' => $i->activity_id, 'activityName' => $i->activity_name];
+        return ['itemId' => $i->id, 'item' => $i->item, 'quarter' => $i->quarter_number, 'activityId' => $i->activity_id, 'activityName' => $i->activity_name, 'hasRecords' => $this->checklistItemsWithRecords([$i->id]) !== []];
     }
 
     // Sets or clears one learner's rating, and optionally its remarks, for one checklist item in one quarter of the section's school year.
@@ -149,17 +165,21 @@ class CurriculumController extends Controller
         }
 
         $key = ['enrollment_id' => $data['enrollmentId'], 'checklist_item_id' => $data['itemId'], 'quarter_id' => $quarterId];
-        // Remarks live on the rating row, so clearing the rating clears its remarks too.
-        if ($data['rating'] === null) {
-            DB::table('learner_developmental_checklists')->where($key)->delete();
-        } else {
-            DB::table('learner_developmental_checklists')->updateOrInsert($key, [
-                'teacher_id' => $teacher->id,
-                'rating' => $data['rating'],
-                'assessed_at' => now(),
-                'updated_at' => now(),
-            ] + (array_key_exists('remarks', $data) ? ['remarks' => $data['remarks']] : []));
-        }
+        // A first rating makes the item protected, so it waits on the lock checklist item edits take.
+        DB::transaction(function () use ($key, $data, $teacher) {
+            Quarter::lockState();
+            // Remarks live on the rating row, so clearing the rating clears its remarks too.
+            if ($data['rating'] === null) {
+                DB::table('learner_developmental_checklists')->where($key)->delete();
+            } else {
+                DB::table('learner_developmental_checklists')->updateOrInsert($key, [
+                    'teacher_id' => $teacher->id,
+                    'rating' => $data['rating'],
+                    'assessed_at' => now(),
+                    'updated_at' => now(),
+                ] + (array_key_exists('remarks', $data) ? ['remarks' => $data['remarks']] : []));
+            }
+        });
         $remarks = DB::table('learner_developmental_checklists')->where($key)->value('remarks');
 
         return response()->json(['enrollmentId' => $data['enrollmentId'], 'itemId' => $data['itemId'], 'quarter' => $data['quarter'], 'rating' => $data['rating'], 'remarks' => $remarks]);
@@ -187,10 +207,12 @@ class CurriculumController extends Controller
             ->get(['lessons.id', 'module_domains.module_id', 'lessons.module_domain_id', 'lessons.title', 'lessons.description', 'lessons.lesson_video_url', 'lessons.quarter_number', 'lessons.week_number', 'lessons.day_of_week'])
             ->groupBy('module_id');
 
-        $activityCounts = DB::table('activities')->where('is_active', true)
-            ->groupBy('lesson_id')->selectRaw('lesson_id, count(*) as total')->pluck('total', 'lesson_id');
+        $recordedLessons = array_flip($this->lessonsWithRecords($lessons->collapse()->pluck('id')->all()));
+
+        $activities = DB::table('activities')->where('is_active', true)->get(['id', 'lesson_id', 'activity_format'])->groupBy('lesson_id');
 
         $schedules = $section ? $this->activeSchedulesByModule($section->id) : [];
+        $completion = $section ? $this->lessonCompletion($section->id, $lessons->collapse(), $activities) : [];
 
         $domains = DB::table('module_domains')
             ->join('developmental_domains', 'developmental_domains.id', '=', 'module_domains.domain_id')
@@ -205,8 +227,65 @@ class CurriculumController extends Controller
             'scheduleDays' => $schedules[$m->id] ?? [],
             'domains' => ($domains[$m->id] ?? collect())->map(fn ($d) => ['id' => $d->id, 'name' => $d->name])->values(),
             'lessons' => ($lessons[$m->id] ?? collect())
-                ->map(fn ($l) => $this->boardLesson($l, $m->id, (int) $l->module_domain_id, (int) ($activityCounts[$l->id] ?? 0)))->values(),
+                ->map(fn ($l) => $this->boardLesson($l, $m->id, (int) $l->module_domain_id, count($activities[$l->id] ?? []), isset($recordedLessons[$l->id]), $completion[$l->id] ?? null))->values(),
         ])->values());
+    }
+
+    // lesson_id => how far this section got with the lesson card it belongs to. Same-named lessons in one
+    // week and domain are one card on the board (groupByTopic), so their activities are required together.
+    // Required: every active activity. The status is classroom delivery: done once the teacher has finished
+    // presenting every required activity in this section's classes (moving on or ending the class closes it),
+    // whatever the learners did, so absent learners never hold it back. The count is learners: the section's
+    // active enrollments (absent and late ones included; transferred, withdrawn and completed ones not), and
+    // a learner completed the card when every required activity is finished: a digital attempt submitted with
+    // any score, or a practical the teacher rated (the Class Scores rule). Sections and enrollments belong to
+    // one school year, so other sections' and earlier years' classes and results never count.
+    private function lessonCompletion(int $sectionId, Collection $lessons, Collection $activities): array
+    {
+        $enrollments = DB::table('learner_school_years')->where(['section_id' => $sectionId, 'status' => 'active'])->pluck('id');
+        $activityIds = $lessons->flatMap(fn ($l) => ($activities[$l->id] ?? collect())->pluck('id'));
+
+        // One row per learner and activity, however many attempts: did they start it, and did they finish it.
+        $work = $enrollments->isEmpty() || $activityIds->isEmpty() ? collect() : DB::table('learner_activity_attempts')
+            ->join('learner_activity_assignments', 'learner_activity_assignments.id', '=', 'learner_activity_attempts.assignment_id')
+            ->join('activities', 'activities.id', '=', 'learner_activity_assignments.activity_id')
+            ->whereIn('learner_activity_assignments.enrollment_id', $enrollments)
+            ->whereIn('learner_activity_assignments.activity_id', $activityIds)
+            ->groupBy('learner_activity_assignments.enrollment_id', 'learner_activity_assignments.activity_id')
+            ->get([
+                'learner_activity_assignments.enrollment_id', 'learner_activity_assignments.activity_id',
+                DB::raw("bool_or((activities.activity_format = 'digital' and learner_activity_attempts.status in ('evaluated', 'submitted'))
+                    or (activities.activity_format = 'practical' and learner_activity_attempts.practical_rating is not null)) as finished"),
+            ])
+            ->groupBy('activity_id');
+
+        // activity_id => true once presented and closed in this section's classes, false while still on screen.
+        $conducted = $activityIds->isEmpty() ? collect() : DB::table('classroom_session_activities')
+            ->join('classroom_session_lessons', 'classroom_session_lessons.id', '=', 'classroom_session_activities.session_lesson_id')
+            ->join('classroom_sessions', 'classroom_sessions.id', '=', 'classroom_session_lessons.classroom_session_id')
+            ->join('section_modules', 'section_modules.id', '=', 'classroom_sessions.section_module_id')
+            ->where('section_modules.section_id', $sectionId)
+            ->whereIn('classroom_session_activities.activity_id', $activityIds)
+            ->whereIn('classroom_session_activities.status', ['active', 'completed'])
+            ->groupBy('classroom_session_activities.activity_id')
+            ->get(['classroom_session_activities.activity_id', DB::raw("bool_or(classroom_session_activities.status = 'completed') as finished")])
+            ->pluck('finished', 'activity_id');
+
+        $total = $enrollments->count();
+        $result = [];
+        foreach ($lessons->groupBy(fn ($l) => "{$l->module_domain_id}|{$l->quarter_number}|{$l->week_number}|".mb_strtolower(trim($l->title))) as $card) {
+            $required = $card->flatMap(fn ($l) => ($activities[$l->id] ?? collect())->pluck('id'))->unique();
+            $rows = $required->flatMap(fn ($id) => $work[$id] ?? []);
+            $completed = $required->isEmpty() ? 0 : $enrollments
+                ->filter(fn ($e) => $rows->where('enrollment_id', $e)->where('finished', true)->count() === $required->count())->count();
+            $status = $required->isNotEmpty() && $required->every(fn ($id) => $conducted[$id] ?? false) ? 'done'
+                : ($rows->isNotEmpty() || $required->contains(fn ($id) => isset($conducted[$id])) ? 'in_progress' : null);
+            foreach ($card as $l) {
+                $result[$l->id] = ['status' => $status, 'completed' => $completed, 'total' => $total];
+            }
+        }
+
+        return $result;
     }
 
     public function domains(): JsonResponse
@@ -276,15 +355,30 @@ class CurriculumController extends Controller
         $data = $request->validated();
 
         $where = ['module_domain_id' => $data['moduleDomainId'], 'quarter_number' => $data['quarter'], 'week_number' => $data['week']];
-        // New lessons go last within their week.
-        $id = DB::table('lessons')->insertGetId($where + [
-            'title' => trim($data['title']),
-            'day_of_week' => $data['day'],
-            'description' => filled($data['description'] ?? null) ? trim($data['description']) : null,
-            'sequence_order' => DB::table('lessons')->where($where)->max('sequence_order') + 1,
-            // The column holds the public-disk path; boardLesson turns it into a URL.
-            'lesson_video_url' => $request->file('video')?->store('lesson-videos', 'public'),
-        ]);
+        $path = $request->file('video')?->store('lesson-videos', 'public');
+
+        try {
+            $id = DB::transaction(function () use ($where, $data, $path) {
+                Quarter::lockState();
+                $this->ensureQuarterEditable((int) $data['quarter']);
+
+                // New lessons go last within their week.
+                return DB::table('lessons')->insertGetId($where + [
+                    'title' => trim($data['title']),
+                    'day_of_week' => $data['day'],
+                    'description' => filled($data['description'] ?? null) ? trim($data['description']) : null,
+                    'sequence_order' => DB::table('lessons')->where($where)->max('sequence_order') + 1,
+                    // The column holds the public-disk path; boardLesson turns it into a URL.
+                    'lesson_video_url' => $path,
+                ]);
+            });
+        } catch (\Throwable $e) {
+            // The lesson never saved, so an uploaded video would be left with nothing pointing at it.
+            if ($path) {
+                Storage::disk('public')->delete($path);
+            }
+            throw $e;
+        }
 
         $lesson = DB::table('lessons')->where('id', $id)->first(['id', 'title', 'description', 'lesson_video_url', 'quarter_number', 'week_number', 'day_of_week']);
 
@@ -298,7 +392,14 @@ class CurriculumController extends Controller
         if ($request->has('title')) {
             $changes['title'] = trim($request->validated('title'));
         }
-        $updated = DB::table('lessons')->where(['id' => $lesson, 'is_active' => true])->update($changes);
+        $updated = DB::transaction(function () use ($lesson, $changes) {
+            Quarter::lockState();
+            // Title and description only: the request has no quarter, so a lesson can't be moved in or out of the active one.
+            $this->ensureQuarterEditable($this->lessonQuarter($lesson));
+            $this->ensureNoRecords($this->lessonsWithRecords([$lesson]) !== []);
+
+            return DB::table('lessons')->where(['id' => $lesson, 'is_active' => true])->update($changes);
+        });
         abort_if(! $updated, 404);
 
         return response()->json(['lessonId' => $lesson, 'description' => $description, 'title' => $changes['title'] ?? null]);
@@ -314,7 +415,17 @@ class CurriculumController extends Controller
         }
 
         $path = $request->file('video')->store('lesson-videos', 'public');
-        DB::table('lessons')->where('id', $lesson)->update(['lesson_video_url' => $path, 'updated_at' => now()]);
+        try {
+            DB::transaction(function () use ($lesson, $path) {
+                Quarter::lockState();
+                $this->ensureQuarterEditable($this->lessonQuarter($lesson));
+                $this->ensureNoRecords($this->lessonsWithRecords([$lesson]) !== []);
+                DB::table('lessons')->where('id', $lesson)->update(['lesson_video_url' => $path, 'updated_at' => now()]);
+            });
+        } catch (\Throwable $e) {
+            Storage::disk('public')->delete($path);
+            throw $e;
+        }
 
         return response()->json(['lessonId' => $lesson, 'videoUrl' => $this->videoUrl($path)]);
     }
@@ -328,6 +439,8 @@ class CurriculumController extends Controller
 
         try {
             $id = DB::transaction(function () use ($lesson, $data, $path) {
+                Quarter::lockState();
+                $this->ensureQuarterEditable($this->lessonQuarter($lesson));
                 $order = (DB::table('activities')->where('lesson_id', $lesson)->max('sequence_order') ?? 0) + 1;
                 $id = DB::table('activities')->insertGetId([
                     'lesson_id' => $lesson,
@@ -366,7 +479,12 @@ class CurriculumController extends Controller
         $path = $request->file('video')?->store('practical-demos', 'public');
 
         try {
-            DB::transaction(function () use ($activity, $data, $path) {
+            DB::transaction(function () use ($activity, $current, $data, $path) {
+                Quarter::lockState();
+                // The request has no lesson, so the activity stays on its lesson and quarter.
+                $this->ensureQuarterEditable($this->lessonQuarter($current->lesson_id));
+                // Its name, steps, rating guide and demo are what past ratings were given against.
+                $this->ensureNoRecords($this->activitiesWithRecords([$activity]) !== []);
                 DB::table('activities')->where('id', $activity)->update(['name' => trim($data['name']), 'description' => trim($data['description']), 'instructions' => trim($data['instructions'])]);
                 DB::table('practical_activity_details')->where('activity_id', $activity)->update([
                     'teacher_guidelines' => trim($data['teacherGuidelines']),
@@ -396,6 +514,9 @@ class CurriculumController extends Controller
         }
 
         DB::transaction(function () use ($activity) {
+            Quarter::lockState();
+            $this->ensureQuarterEditable($this->lessonQuarter(DB::table('activities')->where('id', $activity)->value('lesson_id')));
+            $this->ensureNoRecords($this->activitiesWithRecords([$activity]) !== []);
             DB::table('activities')->where('id', $activity)->update(['is_active' => false]);
             DB::table('developmental_checklist_items')->where('activity_id', $activity)->update(['activity_id' => null, 'updated_at' => now()]);
         });
@@ -414,13 +535,14 @@ class CurriculumController extends Controller
     }
 
     // One activity card; practical ones carry what the edit form needs.
-    private function weekActivity(object $a): array
+    private function weekActivity(object $a, bool $hasRecords = false): array
     {
         return [
             'id' => $a->id,
             'activityName' => $a->name,
             'description' => $a->description,
             'format' => $a->activity_format,
+            'hasRecords' => $hasRecords,
         ] + ($a->activity_format === 'practical' ? [
             'instructions' => $a->instructions,
             'teacherGuidelines' => $a->teacher_guidelines,
@@ -434,15 +556,23 @@ class CurriculumController extends Controller
         $current = DB::table('lessons')->where(['id' => $lesson, 'is_active' => true])->first(['lesson_video_url']);
         abort_if(! $current, 404);
 
+        DB::transaction(function () use ($lesson, $current) {
+            Quarter::lockState();
+            $this->ensureQuarterEditable($this->lessonQuarter($lesson));
+            $this->ensureNoRecords($this->lessonsWithRecords([$lesson]) !== []);
+            if ($current->lesson_video_url) {
+                DB::table('lessons')->where('id', $lesson)->update(['lesson_video_url' => null, 'updated_at' => now()]);
+            }
+        });
+        // Only once the row no longer points at it.
         if ($current->lesson_video_url) {
-            DB::table('lessons')->where('id', $lesson)->update(['lesson_video_url' => null, 'updated_at' => now()]);
             Storage::disk('public')->delete($current->lesson_video_url);
         }
 
         return response()->json(['lessonId' => $lesson, 'videoUrl' => null]);
     }
 
-    private function boardLesson(object $l, int $moduleId, int $domainId, int $activityCount): array
+    private function boardLesson(object $l, int $moduleId, int $domainId, int $activityCount, bool $hasRecords = false, ?array $completion = null): array
     {
         return [
             'id' => $l->id,
@@ -456,6 +586,10 @@ class CurriculumController extends Controller
             'week' => $l->week_number,
             'dayOfWeek' => $l->day_of_week,
             'activityCount' => $activityCount,
+            // Used in a class or by a learner: viewable, never changed again (see ensureNoRecords).
+            'hasRecords' => $hasRecords,
+            // The selected section's progress on this lesson's card (see lessonCompletion); null without ?section=.
+            'completion' => $completion,
         ];
     }
 
@@ -479,12 +613,15 @@ class CurriculumController extends Controller
             ->get(['lessons.id', 'lessons.title', 'lessons.day_of_week']);
 
         $activities = $this->activityRows()->whereIn('activities.lesson_id', $lessons->pluck('id'))->get()->groupBy('lesson_id');
+        $recordedLessons = array_flip($this->lessonsWithRecords($lessons->pluck('id')->all()));
+        $recordedActivities = array_flip($this->activitiesWithRecords($activities->collapse()->pluck('id')->all()));
 
         return response()->json($lessons->map(fn ($l) => [
             'lessonId' => $l->id,
             'lessonName' => $l->title,
             'dayOfWeek' => $l->day_of_week,
-            'activities' => ($activities[$l->id] ?? collect())->map(fn ($a) => $this->weekActivity($a))->values(),
+            'hasRecords' => isset($recordedLessons[$l->id]),
+            'activities' => ($activities[$l->id] ?? collect())->map(fn ($a) => $this->weekActivity($a, isset($recordedActivities[$a->id])))->values(),
         ]));
     }
 
@@ -509,6 +646,86 @@ class CurriculumController extends Controller
         }
 
         return $byModule;
+    }
+
+    // The active quarter's lessons and practical activities are in use by classes, so they're read-only;
+    // teachers prepare the other quarters. Pass every quarter a change touches (both ends of a move).
+    // Call inside a transaction after Quarter::lockState(), so an activation can't land before the write.
+    private function ensureQuarterEditable(?int ...$quarters): void
+    {
+        $active = Quarter::activeNumber();
+        if ($active !== null && in_array($active, $quarters, true)) {
+            throw ValidationException::withMessages(['quarter' => "The {$this->quarterName($active)} is open for classes, so its lessons and practical activities can't be changed. Activate another quarter to edit them."]);
+        }
+    }
+
+    // Content used in a class or by a learner stays as it was, whichever quarter is active now: changing it
+    // would change what existing results mean. Checked after ensureQuarterEditable, so the active quarter's
+    // reason wins when both apply. Call under Quarter::lockState(), the lock class start also takes before
+    // it records the first use.
+    private function ensureNoRecords(bool $hasRecords): void
+    {
+        if ($hasRecords) {
+            throw ValidationException::withMessages(['protected' => 'This content has classroom or learner records and can no longer be changed.']);
+        }
+    }
+
+    // A skill linked to a game takes that game's results as evidence (checklist page, ProgressReportDraft::build),
+    // so linking one to a game learners already played would reinterpret those past results.
+    private function ensureLinkable(?int $activity): void
+    {
+        if ($activity && $this->activitiesWithRecords([$activity]) !== []) {
+            throw ValidationException::withMessages(['activityId' => 'This activity has classroom or learner records, so linking a skill to it would change past results and reports. Leave the skill unlinked or pick an activity without records.']);
+        }
+    }
+
+    // Of these activities, the ones put on screen in a class or assigned to a learner, in any section or school year.
+    // Attempts, scores and practical ratings all hang off an assignment, so they are covered too.
+    private function activitiesWithRecords(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return DB::table('classroom_session_activities')->whereIn('activity_id', $ids)->select('activity_id')
+            ->union(DB::table('learner_activity_assignments')->whereIn('activity_id', $ids)->select('activity_id'))
+            ->pluck('activity_id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    // Of these lessons, the ones taught in a class, or with any activity (even a removed one) that has records.
+    private function lessonsWithRecords(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $usedActivities = DB::table('classroom_session_activities')->select('activity_id')
+            ->union(DB::table('learner_activity_assignments')->select('activity_id'));
+
+        return DB::table('classroom_session_lessons')->whereIn('lesson_id', $ids)->select('lesson_id')
+            ->union(DB::table('activities')->whereIn('lesson_id', $ids)->whereIn('id', $usedActivities)->select('lesson_id'))
+            ->pluck('lesson_id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    // Of these checklist items, the ones a learner was rated on, or linked to a game with records.
+    private function checklistItemsWithRecords(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $usedActivities = DB::table('classroom_session_activities')->select('activity_id')
+            ->union(DB::table('learner_activity_assignments')->select('activity_id'));
+
+        return DB::table('learner_developmental_checklists')->whereIn('checklist_item_id', $ids)->select('checklist_item_id as id')
+            ->union(DB::table('developmental_checklist_items')->whereIn('id', $ids)->whereIn('activity_id', $usedActivities)->select('id'))
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    // Read fresh under the lock; null for a missing lesson, which the caller's 404 handles.
+    private function lessonQuarter(?int $lesson): ?int
+    {
+        $quarter = $lesson ? DB::table('lessons')->where('id', $lesson)->value('quarter_number') : null;
+
+        return $quarter === null ? null : (int) $quarter;
     }
 
     private function quarterName(int $number): string
