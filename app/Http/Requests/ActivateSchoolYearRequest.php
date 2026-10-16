@@ -13,7 +13,7 @@ class ActivateSchoolYearRequest extends FormRequest
     {
         if (is_array($this->input('sections'))) {
             $this->merge(['sections' => array_map(
-                fn ($name) => is_string($name) ? (Section::choice($name) ?? $name) : $name,
+                fn ($name) => is_string($name) ? (Section::choiceFromName($name) ?? $name) : $name,
                 $this->input('sections'),
             )]);
         }

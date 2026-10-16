@@ -11,7 +11,9 @@ class Section extends Model
 {
     public $timestamps = false;
 
-    protected $fillable = ['school_year_id', 'teacher_id', 'name', 'grade_level', 'is_active'];
+    protected $fillable = ['school_year_id', 'teacher_id', 'name', 'grade_level', 'choice', 'is_active'];
+
+    public const NAME_LOCKED_MESSAGE = 'This section has learner or classroom records, so its name can no longer be changed.';
 
     public const GRADE_LEVEL = 'Kindergarten';
 
@@ -49,7 +51,7 @@ class Section extends Model
     }
 
     // "joy" or " Joy " -> "Joy"; null for anything that isn't one of the fixed choices.
-    public static function choice(mixed $name): ?string
+    public static function choiceFromName(mixed $name): ?string
     {
         if (! is_string($name)) {
             return null;
@@ -78,6 +80,7 @@ class Section extends Model
                     'teacher_id' => $teacher->id,
                     'name' => $name,
                     'grade_level' => self::GRADE_LEVEL,
+                    'choice' => $name,
                 ]);
 
                 foreach ($modules as $module) {
@@ -107,17 +110,36 @@ class Section extends Model
         });
     }
 
-    // Shape the frontend's Section type expects.
-    public function toApiArray(): array
+    // "morning" or "afternoon" from the stored Joy/Faith identity, never from the display name; null for an old section without one.
+    public function classSession(): ?string
     {
-        $choice = self::choice($this->name);
+        return $this->choice ? self::CHOICES[$this->choice] : null;
+    }
 
+    /**
+     * The ids among $ids with any enrollment (of any status) or any classroom session; their names are fixed.
+     *
+     * @return array<int, int>
+     */
+    public static function withRecords(array $ids): array
+    {
+        return DB::table('learner_school_years')->whereIn('section_id', $ids)->distinct()->pluck('section_id')
+            ->merge(DB::table('classroom_sessions')
+                ->join('section_modules', 'section_modules.id', '=', 'classroom_sessions.section_module_id')
+                ->whereIn('section_modules.section_id', $ids)->distinct()->pluck('section_modules.section_id'))
+            ->map(fn ($id) => (int) $id)->unique()->values()->all();
+    }
+
+    // Shape the frontend's Section type expects; $hasRecords comes from withRecords().
+    public function toApiArray(bool $hasRecords): array
+    {
         return [
             'sectionId' => $this->id,
             'gradeLevel' => $this->grade_level,
             'sectionName' => $this->name,
-            // Null for a section from before the fixed choices.
-            'session' => $choice ? self::CHOICES[$choice] : null,
+            'session' => $this->classSession(),
+            'canRename' => ! $hasRecords,
+            'renameReason' => $hasRecords ? self::NAME_LOCKED_MESSAGE : null,
         ];
     }
 }

@@ -173,14 +173,20 @@ class LearnerController extends Controller
                 ]);
             }
 
-            // Enrolling into the teacher's section is what makes the learner theirs.
+            // Enrolling into the teacher's section is what makes the learner theirs. FOR SHARE waits out a rename
+            // in progress (SectionController::update) and then sees its new name, so a stale name finds no section.
+            $sectionId = $teacher->sections()
+                ->where('school_year_id', $year->id)
+                ->where('grade_level', $data['gradeLevel'])
+                ->where('name', $data['section'])
+                ->sharedLock()
+                ->value('id');
+            if (! $sectionId) {
+                throw ValidationException::withMessages(['section' => 'This section was just renamed. Reopen the form and pick it again.']);
+            }
             $learner->enrollments()->create([
                 'school_year_id' => $year->id,
-                'section_id' => $teacher->sections()
-                    ->where('school_year_id', $year->id)
-                    ->where('grade_level', $data['gradeLevel'])
-                    ->where('name', $data['section'])
-                    ->value('id'),
+                'section_id' => $sectionId,
                 'enrolled_on' => Carbon::now('Asia/Manila')->toDateString(),
                 'status' => 'active',
             ]);

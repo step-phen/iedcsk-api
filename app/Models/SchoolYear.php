@@ -37,11 +37,8 @@ class SchoolYear extends Model
             'startDate' => $this->start_date?->toDateString(),
             'endDate' => $this->end_date?->toDateString(),
             'status' => $this->status,
-            // The fixed sections (Joy, Faith) already set up for this year; set once, at activation.
-            'sections' => array_values(array_intersect(
-                array_keys(Section::CHOICES),
-                $this->sections->map(fn (Section $s) => Section::choice($s->name))->all(),
-            )),
+            // The fixed sections (Joy, Faith) already set up for this year, by stored identity so a renamed one still counts.
+            'sections' => array_values(array_intersect(array_keys(Section::CHOICES), $this->sections->pluck('choice')->filter()->all())),
         ];
     }
 }

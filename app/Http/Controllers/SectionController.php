@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\UpdateSectionRequest;
 use App\Models\Section;
 use App\Models\Teacher;
 use Illuminate\Container\Attributes\CurrentUser;
@@ -16,17 +17,50 @@ class SectionController extends Controller
 {
     public function index(#[CurrentUser] Teacher $teacher): JsonResponse
     {
-        // Read-only: sections are created only when a school year is activated (Section::setUp).
-        // Joy, then Faith, then any section from before the fixed choices; the first is the default.
+        // Sections are created only when a school year is activated (Section::setUp); only an unused one's name can change.
+        // Joy, then Faith, then any section without a stored choice; the first is the default.
         $order = array_flip(array_keys(Section::CHOICES));
         $sections = $teacher->sections()
             ->whereHas('schoolYear', fn ($q) => $q->where('status', 'active'))
             ->orderBy('id')
             ->get()
-            ->sortBy(fn (Section $s) => $order[Section::choice($s->name) ?? ''] ?? count($order))
+            ->sortBy(fn (Section $s) => $order[$s->choice ?? ''] ?? count($order))
             ->values();
+        $recorded = array_flip(Section::withRecords($sections->pluck('id')->all()));
 
-        return response()->json($sections->map(fn (Section $s) => $s->toApiArray()));
+        return response()->json($sections->map(fn (Section $s) => $s->toApiArray(isset($recorded[$s->id]))));
+    }
+
+    // Renames one of this teacher's sections in the active school year while it has no learner or classroom records.
+    // Only the display name changes: the id, Joy/Faith identity, session, timetable and module links stay.
+    public function update(UpdateSectionRequest $request, #[CurrentUser] Teacher $teacher, int $section): JsonResponse
+    {
+        $section = $teacher->sections()->whereHas('schoolYear', fn ($q) => $q->where('status', 'active'))->findOrFail($section);
+        $name = $request->validated('sectionName');
+
+        $section = DB::transaction(function () use ($section, $name) {
+            // The year's sections, locked: two renames can't take the same name, and enrolling a learner or starting a
+            // class (both lock their section FOR SHARE) either finishes first and is seen below, or waits for this.
+            $siblings = Section::where(['school_year_id' => $section->school_year_id, 'grade_level' => $section->grade_level])
+                ->orderBy('id')->lockForUpdate()->get();
+            $section = $siblings->firstWhere('id', $section->id);
+
+            // Checked again here, so a form opened before a learner was enrolled can't rename the section.
+            if (Section::withRecords([$section->id])) {
+                throw ValidationException::withMessages(['section' => Section::NAME_LOCKED_MESSAGE]);
+            }
+            // Learners are enrolled by section name, so two sections can't share one, whatever the case or spacing.
+            $key = fn (string $n) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($n)));
+            if ($siblings->contains(fn (Section $s) => $s->id !== $section->id && $key($s->name) === $key($name))) {
+                throw ValidationException::withMessages(['sectionName' => 'Another section this school year already has that name.']);
+            }
+
+            $section->update(['name' => $name]);
+
+            return $section;
+        });
+
+        return response()->json($section->toApiArray(false));
     }
 
     // The section's editable timetable: each active module with its active schedule's
