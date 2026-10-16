@@ -2,12 +2,14 @@
 
 namespace Tests;
 
+use App\Http\Requests\LoginRequest;
 use App\Models\Quarter;
 use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -22,6 +24,26 @@ abstract class TestCase extends BaseTestCase
         Section::setUp($year, $teacher, $names);
 
         return Section::where('school_year_id', $year->id)->pluck('id', 'name')->all();
+    }
+
+    /** Posts a browser login from one client IP, sending only the given device cookie and headers. */
+    protected function loginFrom(string $ip, string $username, string $password = 'wrong', ?string $deviceCookie = null, array $headers = []): TestResponse
+    {
+        // Each login is a fresh browser: the test app would otherwise keep the last session's user, guards and queued cookies.
+        $this->app['auth']->forgetGuards();
+        $this->app['session.store']->flush();
+        $this->app['cookie']->flushQueuedCookies();
+        $this->defaultCookies = [];
+        $this->unencryptedCookies = [];
+        if ($deviceCookie !== null) {
+            $this->withUnencryptedCookie(LoginRequest::DEVICE_COOKIE, $deviceCookie);
+        }
+
+        return $this->withCredentials()->withServerVariables(['REMOTE_ADDR' => $ip])->postJson(
+            '/login',
+            ['username' => $username, 'password' => $password],
+            ['Origin' => 'http://localhost:3000', 'Referer' => 'http://localhost:3000/'] + $headers,
+        );
     }
 
     /**
