@@ -394,4 +394,163 @@ class ClassroomSessionTest extends TestCase
             (bool) DB::table('activities')->where('id', $hop)->value('is_active'),
         ]);
     }
+
+    private function saveAttendance(array $marks)
+    {
+        return $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/attendance", ['entries' => array_map(
+            fn (string $name, string $status) => ['learnerId' => $this->kids[$name], 'status' => $status], array_keys($marks), $marks,
+        )]);
+    }
+
+    // The learner's own device: pick the name, then start the activity on screen.
+    private function joinAs(string $name)
+    {
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids[$name]])->assertOk();
+
+        return $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids[$name]]);
+    }
+
+    private function board(): array
+    {
+        $this->device();
+
+        return $this->actingAs($this->tina)->getJson("/api/sections/{$this->joy}/classroom")->assertOk()->json();
+    }
+
+    private function enrollment(string $name): int
+    {
+        return DB::table('learner_school_years')->where('learner_id', $this->kids[$name])->value('id');
+    }
+
+    public function test_a_learner_who_started_an_activity_today_can_only_be_marked_present(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $game = $this->activity('RD-Q1W1-01', 'digital');
+        $readingDomain = DB::table('module_domains')->where('module_id', $this->reading())->value('id');
+        $nextLesson = DB::table('lessons')->insertGetId(['module_domain_id' => $readingDomain, 'title' => 'Letter C', 'quarter_number' => 1, 'week_number' => 1, 'day_of_week' => 3, 'sequence_order' => 1]);
+        $nextGame = DB::table('activities')->insertGetId(['lesson_id' => $nextLesson, 'activity_code' => 'RD-Q1W1-03', 'name' => 'Letter C game', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 1]);
+        $this->start($game)->assertOk();
+
+        // The teacher's modal was loaded before Ana started; her stale Late or Absent is still refused.
+        $this->assertSame([], $this->board()['startedToday']);
+        $this->joinAs('Ana')->assertOk();
+        $this->saveAttendance(['Ana' => 'ABSENT'])->assertStatus(422)
+            ->assertJsonValidationErrors(['entries.0.status' => 'Ana already started an activity today, so only Present is allowed.']);
+        $this->saveAttendance(['Ana' => 'LATE'])->assertStatus(422)->assertJsonValidationErrors('entries.0.status');
+        $this->assertSame([$this->kids['Ana']], $this->board()['startedToday']);
+
+        // Present is accepted; learners who haven't started keep all three choices.
+        $this->saveAttendance(['Ana' => 'PRESENT', 'Ben' => 'LATE'])->assertOk();
+        $this->saveAttendance(['Ben' => 'ABSENT'])->assertOk();
+        $this->saveAttendance(['Ben' => 'PRESENT'])->assertOk();
+
+        // A switch to another lesson resets the card, but the activity Ana started earlier today still counts.
+        $this->actingAs($this->tina)->postJson("/api/sections/{$this->joy}/classroom/start", ['moduleId' => $this->reading(), 'lessonId' => $nextLesson, 'activityId' => $nextGame])->assertOk();
+        $ana = collect($this->board()['learners'])->firstWhere('learnerId', $this->kids['Ana']);
+        $this->assertNull($ana['participantStatus']);
+        $this->saveAttendance(['Ana' => 'ABSENT'])->assertStatus(422)->assertJsonValidationErrors('entries.0.status');
+        $this->saveAttendance(['Ana' => 'LATE'])->assertStatus(422)->assertJsonValidationErrors('entries.0.status');
+
+        // Yesterday's class doesn't lock today's attendance.
+        DB::table('classroom_sessions')->update(['session_date' => now('Asia/Manila')->subDay()->toDateString()]);
+        $this->assertSame([], $this->board()['startedToday']);
+        $this->saveAttendance(['Ana' => 'LATE'])->assertOk();
+        $this->saveAttendance(['Ana' => 'ABSENT'])->assertOk();
+    }
+
+    public function test_a_saved_late_or_absent_on_a_started_learner_must_be_corrected_and_a_refused_save_writes_nothing(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $this->start($this->activity('RD-Q1W1-01', 'digital'))->assertOk();
+
+        // Cara was marked Late and then played; Ana's Absent was saved before this rule existed.
+        $this->saveAttendance(['Cara' => 'LATE'])->assertOk();
+        $this->joinAs('Cara')->assertOk();
+        $this->joinAs('Ana')->assertOk();
+        DB::table('attendance')->where('enrollment_id', $this->enrollment('Ana'))->update(['status' => 'absent']);
+        DB::table('classroom_session_learners')->where('enrollment_id', $this->enrollment('Ana'))->update(['attendance_status' => 'absent']);
+        $marks = fn (string $name) => [
+            DB::table('attendance')->where('enrollment_id', $this->enrollment($name))->value('status'),
+            DB::table('classroom_session_learners')->where('enrollment_id', $this->enrollment($name))->value('attendance_status'),
+        ];
+
+        // Re-saving either mark unchanged is refused, and so is the rest of the batch.
+        $this->saveAttendance(['Ben' => 'ABSENT', 'Cara' => 'LATE', 'Ana' => 'PRESENT'])->assertStatus(422)->assertJsonValidationErrors('entries.1.status');
+        $this->saveAttendance(['Ben' => 'ABSENT', 'Cara' => 'PRESENT', 'Ana' => 'ABSENT'])->assertStatus(422)->assertJsonValidationErrors('entries.2.status');
+        $this->assertSame(['present', 'present'], $marks('Ben'));
+        $this->assertSame(['late', 'late'], $marks('Cara'));
+        $this->assertSame(['absent', 'absent'], $marks('Ana'));
+
+        // Corrected to Present, the whole batch lands in the daily record and the class roster.
+        $this->saveAttendance(['Ben' => 'ABSENT', 'Cara' => 'PRESENT', 'Ana' => 'PRESENT'])->assertOk();
+        $this->assertSame(['absent', 'absent'], $marks('Ben'));
+        $this->assertSame(['present', 'present'], $marks('Cara'));
+        $this->assertSame(['present', 'present'], $marks('Ana'));
+    }
+
+    public function test_an_absent_learner_excused_from_the_classroom_stays_excused(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $this->saveAttendance(['Ben' => 'ABSENT'])->assertOk();
+        $this->start($this->activity('RD-Q1W1-01', 'digital'))->assertOk();
+
+        // The classroom card logs today's slip through the same endpoint as the learner profile.
+        $this->actingAs($this->tina)->putJson("/api/learners/{$this->kids['Ben']}/excuse-slip", ['date' => now('Asia/Manila')->toDateString(), 'reason' => 'Sick'])->assertOk();
+        $this->assertSame('EXCUSED', $this->board()['attendance'][$this->kids['Ben']]);
+        $this->assertSame('excused', DB::table('classroom_session_learners')->where('enrollment_id', $this->enrollment('Ben'))->value('attendance_status'));
+
+        // The slip settles the day: a save that re-marks Ben is refused whole, and Ana's change in it isn't written.
+        $this->saveAttendance(['Ana' => 'LATE', 'Ben' => 'PRESENT'])->assertStatus(422)
+            ->assertJsonValidationErrors(['entries.1.status' => 'Ben is already excused for today.']);
+        $this->assertSame('present', DB::table('attendance')->where('enrollment_id', $this->enrollment('Ana'))->value('status'));
+        $this->assertSame(['excused', 'Sick'], [
+            DB::table('attendance')->where('enrollment_id', $this->enrollment('Ben'))->value('status'),
+            DB::table('attendance')->where('enrollment_id', $this->enrollment('Ben'))->value('excuse_reason'),
+        ]);
+
+        // An excused learner still can't play.
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ben']])->assertForbidden();
+    }
+
+    public function test_attendance_save_and_join_take_the_same_enrollment_lock(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $this->start($this->activity('RD-Q1W1-01', 'digital'))->assertOk();
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
+
+        $sql = [];
+        DB::listen(function ($query) use (&$sql) {
+            $sql[] = $query->sql;
+        });
+        // By reference: an arrow function would freeze $sql at the empty array.
+        $first = function (string $pattern) use (&$sql) {
+            return collect($sql)->search(fn ($s) => preg_match($pattern, $s) === 1);
+        };
+        $lock = '/from "learner_school_years".*for update/';
+
+        // The save locks the enrollment before it checks for started activities or writes a mark.
+        $this->saveAttendance(['Ana' => 'ABSENT'])->assertOk();
+        $this->assertNotFalse($first($lock));
+        $this->assertLessThan($first('/from "learner_activity_assignments"/'), $first($lock));
+        $this->assertLessThan($first('/^(insert into|update) "attendance"/'), $first($lock));
+
+        // Ana's device, already claimed, can't start once she is Absent.
+        $this->app['auth']->forgetGuards();
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertForbidden();
+
+        // Join takes the same lock, re-reads the mark under it, and only then starts the activity.
+        $this->saveAttendance(['Ana' => 'PRESENT'])->assertOk();
+        $this->app['auth']->forgetGuards();
+        $sql = [];
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $locked = $first($lock);
+        $this->assertNotFalse($locked);
+        $reread = collect($sql)->slice($locked + 1)->search(fn ($s) => str_contains($s, 'select "attendance_status" from "classroom_session_learners"'));
+        $this->assertNotFalse($reread);
+        $this->assertLessThan($first('/^insert into "learner_activity_assignments"/'), $reread);
+    }
 }

@@ -20,6 +20,18 @@ class LanguageQuarterTwoLessonsSeeder extends Seeder
         [3, 1, 1, 'Recognizing Consonants Nn and Pp', 'Learners recognize Nn, Pp after hearing letter names.'],
         [3, 3, 2, 'Recognizing Consonants Qq and Rr', 'Learners recognize Qq, Rr after hearing letter names.'],
         [3, 5, 3, 'Recognizing Consonants Ss and Tt', 'Learners recognize Ss, Tt after hearing letter names.'],
+        [4, 1, 1, 'Recognizing Consonants Vv and Ww', 'Learners recognize Vv, Ww after hearing letter names.'],
+        [4, 3, 2, 'Recognizing Consonants Xx and Yy', 'Learners recognize Xx, Yy after hearing letter names.'],
+        [4, 5, 3, 'Reviewing Taught Letter Names', 'Learners identify taught letter names and forms.'],
+        [5, 1, 1, 'Recognizing Consonants Zz', 'Learners recognize Zz after hearing letter names.'],
+        [5, 3, 2, 'Matching Uppercase and Lowercase Consonants', 'Learners connect taught uppercase consonants with their lowercase forms.'],
+        [5, 5, 3, 'Recognizing Consonants in Mixed Order', 'Learners recognize taught letters after hearing letter names.'],
+        [6, 1, 1, 'Recognizing All Five Vowels', 'Learners recognize Aa, Ee, Ii, Oo, Uu after hearing letter names.'],
+        [6, 3, 2, 'Finding a Named Consonant', 'Learners identify a taught consonant after hearing its letter name.'],
+        [6, 5, 3, 'Recognizing Letters in Familiar Labels', 'Learners find taught letters in pictured labels.'],
+        [7, 1, 1, 'Identifying Mixed Uppercase and Lowercase Letters', 'Learners recognize taught letter forms in mixed groups.'],
+        [7, 3, 2, 'Reviewing Second-Quarter Language Skills', 'Learners identify taught letter names and forms.'],
+        [7, 5, 3, 'Assessing Second-Quarter Language Skills', 'Learners identify taught letter names and forms.'],
     ];
 
     public function run(): void

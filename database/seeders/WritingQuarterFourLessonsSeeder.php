@@ -14,6 +14,12 @@ class WritingQuarterFourLessonsSeeder extends Seeder
         [1, 1, 1, 'Tracing Lowercase Letter g', 'Learners combine taught strokes to trace lowercase g with increasing control.'],
         [1, 3, 2, 'Tracing Lowercase Letter p', 'Learners combine taught strokes to trace lowercase p with increasing control.'],
         [1, 5, 3, 'Tracing Lowercase Letter j', 'Learners combine taught strokes to trace lowercase j with increasing control.'],
+        [2, 1, 4, 'Tracing Lowercase Letter e', 'Learners combine taught strokes to trace lowercase e with increasing control.'],
+        [2, 3, 5, 'Tracing Lowercase Letter c', 'Learners combine taught strokes to trace lowercase c with increasing control.'],
+        [2, 5, 6, 'Tracing Lowercase Letter a', 'Learners combine taught strokes to trace lowercase a with increasing control.'],
+        [3, 1, 7, 'Tracing Lowercase Letter q', 'Learners combine taught strokes to trace lowercase q with increasing control.'],
+        [3, 3, 8, 'Tracing Lowercase Letter o', 'Learners combine taught strokes to trace lowercase o with increasing control.'],
+        [3, 5, 9, 'Tracing Lowercase Letter s', 'Learners combine taught strokes to trace lowercase s with increasing control.'],
     ];
 
     public function run(): void
