@@ -169,7 +169,7 @@ class LearnerTest extends TestCase
         $this->actingAs($omar)->getJson("/api/learners?section={$joyId}")->assertOk()->assertJsonCount(0);
     }
 
-    public function test_ready_for_kinder_2_needs_every_quarter_rated_achieved_or_developing(): void
+    public function test_ready_for_grade_1_needs_every_quarter_rated_achieved_or_developing(): void
     {
         $this->actingAs($this->tina)->postJson('/api/learners', $this->payload())->assertCreated();
         $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['firstName' => 'Ben']))->assertCreated();
