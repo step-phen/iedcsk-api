@@ -45,6 +45,8 @@ class ClassroomController extends Controller
                 ->get(['enrollment_id', 'status'])
                 ->mapWithKeys(fn ($a) => [$enrollments[$a->enrollment_id] => strtoupper($a->status)])
                 ->all(),
+            // Learners who started an activity today can only be marked Present; the modal locks the other options.
+            'startedToday' => ClassSession::startedToday($section->id, $enrollments->keys())->map(fn ($id) => $enrollments[$id])->values(),
             'learners' => $this->learners($section->id, $enrollments, $active),
         ]);
     }
@@ -118,6 +120,7 @@ class ClassroomController extends Controller
     }
 
     // Today's marks go to the daily attendance record and, during a class, to that class's roster too.
+    // A learner who started an activity today was in class, so only Present is accepted for them — even re-saving an old Late or Absent.
     public function attendance(SaveAttendanceRequest $request, #[CurrentUser] Teacher $teacher, int $section): JsonResponse
     {
         $section = $teacher->sections()->findOrFail($section);
@@ -133,7 +136,25 @@ class ClassroomController extends Controller
         $sessionId = $open && $open->section_id === $section->id ? $open->id : null;
         $now = now();
 
-        DB::transaction(function () use ($entries, $byLearner, $teacher, $sessionId, $now) {
+        DB::transaction(function () use ($entries, $byLearner, $teacher, $sessionId, $now, $section) {
+            // Same lock as a learner's join, then every entry is checked before anything is written.
+            $enrollmentIds = collect($entries)->map(fn ($entry) => $byLearner[$entry['learnerId']]);
+            ClassSession::lockEnrollments($enrollmentIds);
+            $started = ClassSession::startedToday($section->id, $enrollmentIds)->flip();
+            // An excuse slip settles the day; re-marking would keep its reason on a Present or Late record.
+            $excused = DB::table('attendance')->whereIn('enrollment_id', $enrollmentIds)
+                ->where(['attendance_date' => ClassSession::today(), 'status' => 'excused'])->pluck('enrollment_id')->flip();
+            foreach ($entries as $i => $entry) {
+                if (isset($excused[$byLearner[$entry['learnerId']]])) {
+                    $name = DB::table('learners')->where('id', $entry['learnerId'])->value('first_name');
+                    throw ValidationException::withMessages(["entries.$i.status" => "$name is already excused for today."]);
+                }
+                if ($entry['status'] !== 'PRESENT' && isset($started[$byLearner[$entry['learnerId']]])) {
+                    $name = DB::table('learners')->where('id', $entry['learnerId'])->value('first_name');
+                    throw ValidationException::withMessages(["entries.$i.status" => "$name already started an activity today, so only Present is allowed."]);
+                }
+            }
+
             foreach ($entries as $entry) {
                 $enrollmentId = $byLearner[$entry['learnerId']];
                 $status = strtolower($entry['status']);

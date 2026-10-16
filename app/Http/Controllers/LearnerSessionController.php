@@ -203,14 +203,20 @@ class LearnerSessionController extends Controller
             return response()->json(['message' => 'Your teacher has not picked an activity yet.'], 400);
         }
 
-        $finished = DB::transaction(function () use ($session, $row, $active) {
+        $outcome = DB::transaction(function () use ($session, $row, $active) {
             $now = now();
+            // Same lock as the teacher's attendance save; re-read the mark under it so an Absent saved meanwhile wins.
+            ClassSession::lockEnrollments([$row->enrollment_id]);
+            $attendance = DB::table('classroom_session_learners')->where('id', $row->id)->value('attendance_status');
+            if (! in_array($attendance, self::PLAYABLE, true)) {
+                return 'forbidden';
+            }
             $assignment = DB::table('learner_activity_assignments')
                 ->where(['enrollment_id' => $row->enrollment_id, 'session_activity_id' => $active->session_activity_id])
                 ->lockForUpdate()->first();
             // An activity is played once: finishing it in any earlier class counts too.
             if ($assignment?->status === 'completed' || $this->completedAssignment($row->enrollment_id, $active->activity_id)) {
-                return true;
+                return 'finished';
             }
 
             $assignmentId = $assignment?->id ?? DB::table('learner_activity_assignments')->insertGetId([
@@ -239,9 +245,12 @@ class LearnerSessionController extends Controller
                 'updated_at' => $now,
             ]);
 
-            return false;
+            return 'ok';
         });
-        if ($finished) {
+        if ($outcome === 'forbidden') {
+            return response()->json(['message' => "Learner has not been marked present for today's class."], 403);
+        }
+        if ($outcome === 'finished') {
             return response()->json(['message' => 'This activity has already been completed.'], 409);
         }
 

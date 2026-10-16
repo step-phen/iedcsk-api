@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 // Queries shared by the teacher's classroom and the learner devices for one classroom_sessions row.
@@ -11,6 +12,29 @@ class ClassSession
     public static function today(): string
     {
         return Carbon::now('Asia/Manila')->toDateString();
+    }
+
+    // The one lock attendance saves and learner joins both take, so a mark and a join for the same learner never interleave.
+    // Ordered by id so a multi-learner save can't deadlock against another.
+    public static function lockEnrollments(iterable $enrollmentIds): void
+    {
+        DB::table('learner_school_years')->whereIn('id', collect($enrollmentIds)->all())->orderBy('id')->lockForUpdate()->pluck('id');
+    }
+
+    // Enrollments that started an activity today (Manila date) in any of this section's classes, any lesson.
+    public static function startedToday(int $sectionId, iterable $enrollmentIds): Collection
+    {
+        return DB::table('learner_activity_assignments')
+            ->join('classroom_session_activities', 'classroom_session_activities.id', '=', 'learner_activity_assignments.session_activity_id')
+            ->join('classroom_session_lessons', 'classroom_session_lessons.id', '=', 'classroom_session_activities.session_lesson_id')
+            ->join('classroom_sessions', 'classroom_sessions.id', '=', 'classroom_session_lessons.classroom_session_id')
+            ->join('section_modules', 'section_modules.id', '=', 'classroom_sessions.section_module_id')
+            ->where('section_modules.section_id', $sectionId)
+            ->where('classroom_sessions.session_date', self::today())
+            ->whereIn('learner_activity_assignments.status', ['in_progress', 'completed'])
+            ->whereIn('learner_activity_assignments.enrollment_id', collect($enrollmentIds)->all())
+            ->distinct()
+            ->pluck('learner_activity_assignments.enrollment_id');
     }
 
     // The activity on screen in a class: its session activity row, the activity, its lesson and module, or null.
