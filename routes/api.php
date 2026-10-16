@@ -55,6 +55,7 @@ Route::middleware(['auth:sanctum', EnsureTeacherCanWork::class])->group(function
     Route::put('/sections/{section}/classroom/practical-rating', [ClassroomController::class, 'practicalRating'])->whereNumber('section');
     Route::put('/sections/{section}/attendance', [ClassroomController::class, 'attendance'])->whereNumber('section');
     Route::get('/sections/{section}/classroom-record', [ClassroomRecordController::class, 'show'])->whereNumber('section');
+    Route::get('/sections/{section}/classroom-record/strengths', [ClassroomRecordController::class, 'strengths'])->whereNumber('section');
     Route::get('/sections/{section}/progress-reports', [ProgressReportController::class, 'index'])->whereNumber('section');
     Route::post('/sections/{section}/progress-reports', [ProgressReportController::class, 'store'])->whereNumber('section');
     Route::get('/progress-reports/{report}', [ProgressReportController::class, 'show'])->whereNumber('report');
