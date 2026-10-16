@@ -65,6 +65,8 @@ class ClassroomController extends Controller
         }
 
         $sessionId = DB::transaction(function () use ($teacher, $section, $sectionModule, $data) {
+            // A class is a classroom record that fixes the section's name, so it waits out a rename in progress.
+            Section::whereKey($section->id)->sharedLock()->first();
             // Read under the quarter lock, so a quarter switched mid-request can't start or keep a class.
             Quarter::lockState();
             $quarter = DB::table('quarters')->where(['school_year_id' => $section->school_year_id, 'status' => 'active'])->first(['id', 'quarter_number']);

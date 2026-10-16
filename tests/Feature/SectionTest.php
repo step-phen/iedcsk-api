@@ -6,6 +6,7 @@ use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -61,7 +62,7 @@ class SectionTest extends TestCase
         $this->actingAs($tina)->patchJson("/api/school-years/{$joyOnly->id}/activate", ['sections' => ['joy']])
             ->assertOk()->assertJson(['status' => 'active', 'sections' => ['Joy']]);
         $sections = $this->actingAs($tina)->getJson('/api/sections')->assertOk()
-            ->assertExactJson([['sectionId' => DB::table('sections')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning']])
+            ->assertExactJson([['sectionId' => DB::table('sections')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning', 'canRename' => true, 'renameReason' => null]])
             ->json();
         // All five modules, each with its morning timetable: Reading, Language, Writing on M/W/F plus MAPEH, Math on T/Th.
         $this->assertSame(5, DB::table('section_modules')->count());
@@ -142,22 +143,155 @@ class SectionTest extends TestCase
         $this->assertSame(0, DB::table('sections')->count());
     }
 
-    public function test_sections_from_before_the_fixed_choices_stay_listed(): void
+    private function enrollIn(int $sectionId, string $status = 'active'): int
+    {
+        return DB::table('learner_school_years')->insertGetId([
+            'learner_id' => DB::table('learners')->insertGetId(['first_name' => 'Ana', 'last_name' => 'Cruz', 'birth_date' => '2021-01-01', 'gender' => 'Female']),
+            'school_year_id' => DB::table('sections')->where('id', $sectionId)->value('school_year_id'),
+            'section_id' => $sectionId, 'enrolled_on' => '2026-06-01', 'status' => $status,
+        ]);
+    }
+
+    public function test_old_sections_get_a_joy_or_faith_identity_only_when_their_name_is_unambiguous(): void
     {
         $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $hope = Section::create(['school_year_id' => $year->id, 'teacher_id' => $tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Hope']);
-        $joy = Section::create(['school_year_id' => $year->id, 'teacher_id' => $tina->id, 'grade_level' => 'Kindergarten', 'name' => 'joy']);
+        $row = fn (string $name) => Section::create(['school_year_id' => $year->id, 'teacher_id' => $tina->id, 'grade_level' => 'Kindergarten', 'name' => $name]);
+        $hope = $row('Hope');
+        $joy = $row(' joy ');
+        // Two names that both read as Faith: neither is guessed.
+        $faith = $row('Faith');
+        $faithToo = $row('faith');
 
-        // A lowercase joy still reads as the morning Joy and lists first; Hope is kept, without a session.
-        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertExactJson([
-            ['sectionId' => $joy->id, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'joy', 'session' => 'morning'],
-            ['sectionId' => $hope->id, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Hope', 'session' => null],
-        ]);
+        (require database_path('migrations/2026_10_16_000100_add_choice_to_sections_table.php'))->backfill();
+
+        $this->assertSame([null, 'Joy', null, null], [$hope->refresh()->choice, $joy->refresh()->choice, $faith->refresh()->choice, $faithToo->refresh()->choice]);
+        // Joy lists first as the morning section; the others are kept, without a session.
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()
+            ->assertJsonPath('0.sectionId', $joy->id)->assertJsonPath('0.session', 'morning')
+            ->assertJsonPath('1.session', null)->assertJsonPath('2.session', null)->assertJsonPath('3.session', null);
         $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['sections' => ['Joy']]);
         $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/activate", ['sections' => ['Faith']])
             ->assertStatus(422)->assertJsonValidationErrors('sections');
-        $this->assertSame(2, DB::table('sections')->count());
+        $this->assertSame(4, DB::table('sections')->count());
+    }
+
+    public function test_an_empty_section_is_renamed_keeping_its_id_identity_session_order_and_timetable(): void
+    {
+        $this->seed(CurriculumSeeder::class);
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        ['Joy' => $joy, 'Faith' => $faith] = $this->setUpSections($tina, ['Joy', 'Faith'], $year);
+        $times = $this->languageTimes($joy);
+        $links = DB::table('section_modules')->where('section_id', $joy)->orderBy('id')->pluck('id')->all();
+
+        $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => '  Sampaguita   Class '])->assertOk()
+            ->assertExactJson(['sectionId' => $joy, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Sampaguita Class', 'session' => 'morning', 'canRename' => true, 'renameReason' => null]);
+
+        // Same row, still Joy (morning), listed first, owned by Tina, with the same module links and timetable.
+        $this->assertSame(['Joy', $tina->id], [Section::find($joy)->choice, Section::find($joy)->teacher_id]);
+        $this->assertSame($links, DB::table('section_modules')->where('section_id', $joy)->orderBy('id')->pluck('id')->all());
+        $this->assertSame($times, $this->languageTimes($joy));
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()
+            ->assertJsonPath('0.sectionId', $joy)->assertJsonPath('0.sectionName', 'Sampaguita Class')->assertJsonPath('0.session', 'morning')
+            ->assertJsonPath('1.sectionId', $faith)->assertJsonPath('1.session', 'afternoon');
+
+        // Activation still sees Joy and Faith as taken: no second Joy, even under the old name.
+        $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['sections' => ['Joy', 'Faith']]);
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/activate", ['sections' => ['Joy']])
+            ->assertStatus(422)->assertJsonValidationErrors('sections');
+        // In a savepoint, so the failed insert doesn't abort the rest of the test.
+        $this->assertThrows(fn () => DB::transaction(fn () => Section::create(['school_year_id' => $year->id, 'teacher_id' => $tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Joy', 'choice' => 'Joy'])), UniqueConstraintViolationException::class);
+        $this->assertSame(2, DB::table('sections')->where('school_year_id', $year->id)->count());
+
+        // Its own name in another case is not a clash.
+        $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => 'SAMPAGUITA CLASS'])->assertOk();
+    }
+
+    public function test_any_enrollment_of_any_status_fixes_the_name(): void
+    {
+        $old = $this->year('2025-2026', '2025-06-01', '2026-03-31', 'completed');
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        ['Joy' => $lastYear] = $this->setUpSections($tina, ['Joy'], $old);
+        ['Joy' => $joy] = $this->setUpSections($tina, ['Joy'], $year);
+        // A learner in last year's Joy does not lock this year's.
+        $this->enrollIn($lastYear, 'completed');
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonPath('0.canRename', true);
+
+        foreach (['active', 'completed', 'transferred', 'withdrawn'] as $status) {
+            $enrollment = $this->enrollIn($joy, $status);
+            $this->actingAs($tina)->getJson('/api/sections')->assertOk()
+                ->assertJsonPath('0.canRename', false)->assertJsonPath('0.renameReason', Section::NAME_LOCKED_MESSAGE);
+            $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => 'Hope'])
+                ->assertStatus(422)->assertJsonValidationErrors(['section' => Section::NAME_LOCKED_MESSAGE]);
+            DB::table('learner_school_years')->where('id', $enrollment)->delete();
+        }
+        $this->assertSame('Joy', Section::find($joy)->name);
+    }
+
+    public function test_classroom_history_without_learners_fixes_the_name(): void
+    {
+        $this->seed(CurriculumSeeder::class);
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        ['Joy' => $joy] = $this->setUpSections($tina, ['Joy'], $year);
+        $quarter = DB::table('quarters')->insertGetId(['school_year_id' => $year->id, 'quarter_number' => 1, 'name' => 'Q1', 'start_date' => '2026-06-01', 'end_date' => '2026-08-31', 'status' => 'active']);
+        DB::table('classroom_sessions')->insert([
+            'section_module_id' => DB::table('section_modules')->where('section_id', $joy)->value('id'), 'quarter_id' => $quarter, 'teacher_id' => $tina->id,
+            'session_date' => '2026-06-02', 'planned_start_time' => '08:00', 'planned_end_time' => '09:00', 'status' => 'cancelled',
+        ]);
+
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonPath('0.canRename', false);
+        $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => 'Hope'])
+            ->assertStatus(422)->assertJsonValidationErrors(['section' => Section::NAME_LOCKED_MESSAGE]);
+        $this->assertSame('Joy', Section::find($joy)->name);
+    }
+
+    public function test_a_rename_form_opened_before_a_learner_was_enrolled_is_rejected(): void
+    {
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        ['Joy' => $joy] = $this->setUpSections($tina, ['Joy'], $year);
+
+        // The form opened while the section was still empty...
+        $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertJsonPath('0.canRename', true);
+        // ...then a learner was enrolled before it was sent.
+        $this->enrollIn($joy);
+
+        $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => 'Hope'])
+            ->assertStatus(422)->assertJsonValidationErrors(['section' => Section::NAME_LOCKED_MESSAGE]);
+        $this->assertSame('Joy', Section::find($joy)->name);
+    }
+
+    public function test_a_section_name_must_be_filled_short_and_unused_this_year(): void
+    {
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        ['Joy' => $joy] = $this->setUpSections($tina, ['Joy', 'Faith'], $year);
+
+        foreach (['', '   ', str_repeat('a', 51), 'faith', '  FAITH  '] as $name) {
+            $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => $name])
+                ->assertStatus(422)->assertJsonValidationErrors('sectionName');
+        }
+        $this->actingAs($tina)->patchJson("/api/sections/{$joy}", [])->assertStatus(422)->assertJsonValidationErrors('sectionName');
+        $this->assertSame(['Faith', 'Joy'], DB::table('sections')->orderBy('name')->pluck('name')->all());
+    }
+
+    public function test_only_the_owners_sections_in_the_active_year_can_be_renamed(): void
+    {
+        $old = $this->year('2025-2026', '2025-06-01', '2026-03-31', 'completed');
+        $year = $this->year('2026-2027', '2026-06-01', '2027-03-31', 'active');
+        $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
+        $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
+        ['Joy' => $lastYear] = $this->setUpSections($tina, ['Joy'], $old);
+        ['Joy' => $joy] = $this->setUpSections($tina, ['Joy'], $year);
+
+        $this->patchJson("/api/sections/{$joy}", ['sectionName' => 'Hope'])->assertUnauthorized();
+        $this->actingAs($omar)->patchJson("/api/sections/{$joy}", ['sectionName' => 'Hope'])->assertNotFound();
+        // A past year's section keeps the name its records were made under.
+        $this->actingAs($tina)->patchJson("/api/sections/{$lastYear}", ['sectionName' => 'Hope'])->assertNotFound();
+        $this->assertSame(['Joy', 'Joy'], DB::table('sections')->pluck('name')->all());
     }
 
     public function test_active_session_shows_current_module_and_activity_scoped_to_teacher(): void

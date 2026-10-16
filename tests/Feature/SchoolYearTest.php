@@ -339,10 +339,10 @@ class SchoolYearTest extends TestCase
         $this->actingAs($tina)->patchJson("/api/school-years/{$id}/activate", self::BOTH)->assertOk()->assertJson(['status' => 'active']);
         $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()->assertJson(['schoolYearId' => $id, 'name' => '2026-2027', 'sections' => ['Joy', 'Faith']]);
 
-        // Activation set up Joy (morning) and Faith (afternoon), with no learners.
+        // Activation set up Joy (morning) and Faith (afternoon), with no learners, so both can still be renamed.
         $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertExactJson([
-            ['sectionId' => DB::table('sections')->where('name', 'Joy')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning'],
-            ['sectionId' => DB::table('sections')->where('name', 'Faith')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith', 'session' => 'afternoon'],
+            ['sectionId' => DB::table('sections')->where('name', 'Joy')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning', 'canRename' => true, 'renameReason' => null],
+            ['sectionId' => DB::table('sections')->where('name', 'Faith')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith', 'session' => 'afternoon', 'canRename' => true, 'renameReason' => null],
         ]);
         $this->assertSame(0, DB::table('learners')->count());
         $this->assertSame(0, DB::table('learner_school_years')->count());
