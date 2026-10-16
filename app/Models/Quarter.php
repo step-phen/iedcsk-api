@@ -30,14 +30,12 @@ class Quarter extends Model
         DB::statement('SELECT pg_advisory_xact_lock(?)', [self::STATE_LOCK]);
     }
 
-    // The quarter (1-4) open for classes: the active school year's active quarter, or null.
-    public static function activeNumber(): ?int
+    // Status (upcoming|active|completed) of each quarter the active school year has configured, keyed 1-4.
+    // A quarter without a row there is left out, as is everything when no year is active.
+    public static function statuses(): array
     {
-        $number = self::where('status', 'active')
-            ->whereIn('school_year_id', SchoolYear::where('status', 'active')->select('id'))
-            ->value('quarter_number');
-
-        return $number === null ? null : (int) $number;
+        return self::whereIn('school_year_id', SchoolYear::where('status', 'active')->select('id'))
+            ->pluck('status', 'quarter_number')->all();
     }
 
     protected function casts(): array
