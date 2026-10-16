@@ -95,15 +95,11 @@ class ProgressReportDraft
         $results = ClassroomRecordController::latestResults(collect([$report->enrollment_id]), $items->pluck('activity_id')->filter()->unique()->values())
             ->keyBy('activity_id');
 
-        // A linked skill goes to its game's row. An unlinked one only when its domain has a single row:
-        // Reading and Language share a domain, so an unlinked skill there cannot be placed without guessing.
         $byDomain = $rows->groupBy('domain_id');
         $skills = [];
         $unplaced = [];
         foreach ($items as $item) {
-            $row = $item->activity_id !== null
-                ? $rows->firstWhere('module_domain_id', $item->module_domain_id)
-                : ($byDomain->get($item->domain_id, collect())->count() === 1 ? $byDomain->get($item->domain_id)->first() : null);
+            $row = self::place($rows, $byDomain, $item);
             $skill = self::evidence($item, $ratings->get($item->id), $item->activity_id !== null ? $results->get($item->activity_id) : null);
             if ($row) {
                 $skills[$row->module_domain_id][] = $skill;
@@ -119,6 +115,15 @@ class ProgressReportDraft
         }
 
         return ['rows' => $out, 'unplaced' => $unplaced];
+    }
+
+    // A linked skill goes to its game's row. An unlinked one only when its domain has a single row:
+    // Reading and Language share a domain, so an unlinked skill there cannot be placed without guessing.
+    public static function place(Collection $rows, Collection $byDomain, object $item): ?object
+    {
+        return $item->activity_id !== null
+            ? $rows->firstWhere('module_domain_id', $item->module_domain_id)
+            : ($byDomain->get($item->domain_id, collect())->count() === 1 ? $byDomain->get($item->domain_id)->first() : null);
     }
 
     // One skill with everything recorded for it; the first source present (checklist, practical, digital) sets its level.
