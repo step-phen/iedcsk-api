@@ -34,7 +34,7 @@ class LearnerController extends Controller
                 fn ($e) => $e->where('section_id', $id)
                     ->whereHas('schoolYear', fn ($y) => $y->where('status', 'active')),
             ))
-            ->when($request->boolean('ready'), fn ($q) => $this->readyForKinder2($q))
+            ->when($request->boolean('ready'), fn ($q) => $this->readyForGrade1($q))
             ->with('latestEnrollment.section')
             ->orderBy('last_name')->orderBy('first_name')
             ->get();
@@ -42,8 +42,8 @@ class LearnerController extends Controller
         return response()->json($learners->map(fn (Learner $learner) => $learner->toListArray()));
     }
 
-    // Ready for Kinder 2: every active checklist item from Q1 to Q4 is rated achieved or developing this school year.
-    private function readyForKinder2($query)
+    // Ready for Grade 1: every active checklist item from Q1 to Q4 is rated achieved or developing this school year.
+    private function readyForGrade1($query)
     {
         $items = DB::table('developmental_checklist_items')->where(['grade_level' => CurriculumController::GRADE_LEVEL, 'is_active' => true]);
         $total = (clone $items)->count();
