@@ -144,7 +144,8 @@ class CurriculumTest extends TestCase
         $this->getJson('/api/domains')->assertUnauthorized();
 
         $this->seed(CurriculumSeeder::class);
-        SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
+        // The active year has no quarters set up yet: adding a module isn't quarter-specific, so it still works.
+        $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $old = SchoolYear::create(['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-03-31', 'status' => 'completed']);
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $omar = Teacher::create(['username' => 'omar', 'name' => 'Omar', 'password_hash' => 'x']);
@@ -185,12 +186,15 @@ class CurriculumTest extends TestCase
         $this->assertSame([[$joy, $tina->id], [$faith, $omar->id]], $links->map(fn ($l) => [$l->section_id, $l->teacher_id])->all());
         $this->assertFalse(DB::table('section_modules')->where('section_id', $oldSection)->exists());
 
-        // It shows on the board and takes lessons like any other module.
+        $this->assertSame(0, DB::table('quarters')->count());
+
+        // It shows on the board and takes lessons like any other module, once their quarter is set up as upcoming.
         $board = collect($this->actingAs($tina)->getJson("/api/modules?section={$joy}")->assertOk()->json())->firstWhere('id', $created['id']);
         $this->assertSame('Science Explorers', $board['moduleName']);
-        $this->actingAs($tina)->postJson("/api/modules/{$created['id']}/lessons", [
-            'moduleDomainId' => $created['domains'][1]['id'], 'title' => 'Plants', 'quarter' => 1, 'week' => 1, 'day' => 2,
-        ])->assertCreated();
+        $plants = ['moduleDomainId' => $created['domains'][1]['id'], 'title' => 'Plants', 'quarter' => 1, 'week' => 1, 'day' => 2];
+        $this->actingAs($tina)->postJson("/api/modules/{$created['id']}/lessons", $plants)->assertStatus(422)->assertJsonValidationErrors(['quarter' => "The 1st Quarter isn't set up"]);
+        $this->upcomingQuarterOne($year);
+        $this->actingAs($tina)->postJson("/api/modules/{$created['id']}/lessons", $plants)->assertCreated();
 
         $this->assertSame('Science Discovery', collect($this->actingAs($tina)->getJson('/api/domains')->assertOk()->json())->last()['domainName']);
         $this->actingAs($tina)->postJson('/api/modules', ['moduleName' => 'science explorers', 'domainIds' => [$math]])->assertStatus(422)->assertJsonValidationErrors('moduleName');
@@ -282,9 +286,17 @@ class CurriculumTest extends TestCase
         $this->actingAs($tina)->getJson("/api/modules?section={$joy}")->assertNotFound();
     }
 
+    // An active 2026-2027 whose 1st Quarter is upcoming, the only state in which its lessons can be prepared.
+    private function upcomingQuarterOne(?SchoolYear $year = null): void
+    {
+        $year ??= SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
+        DB::table('quarters')->insert(['school_year_id' => $year->id, 'quarter_number' => 1, 'name' => 'Q1', 'start_date' => '2026-06-01', 'end_date' => '2026-08-31', 'status' => 'upcoming']);
+    }
+
     public function test_teacher_adds_lesson_to_module_domain(): void
     {
         $this->seed(CurriculumSeeder::class);
+        $this->upcomingQuarterOne();
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $reading = DB::table('modules')->where('code', 'reading')->value('id');
         $mapeh = DB::table('modules')->where('code', 'mapeh')->value('id');
@@ -347,6 +359,7 @@ class CurriculumTest extends TestCase
     public function test_teacher_creates_a_practical_activity(): void
     {
         $this->seed(CurriculumSeeder::class);
+        $this->upcomingQuarterOne();
         $disk = Storage::fake('public');
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $lesson = DB::table('lessons')->insertGetId([
@@ -431,7 +444,7 @@ class CurriculumTest extends TestCase
         $digital = DB::table('activities')->insertGetId(['lesson_id' => $q2, 'activity_code' => 'DG-1', 'name' => 'Game', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 2]);
         $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
         $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
-        $locked = ['quarter' => 'The 2nd Quarter is open for classes'];
+        $locked = ['quarter' => 'The 2nd Quarter is active and open for classes, so its lessons and practical activities are read-only.'];
         $as = $this->actingAs($tina);
 
         // Q2 is open for classes: nothing in it can be added, changed or removed.
@@ -505,6 +518,96 @@ class CurriculumTest extends TestCase
         $this->assertSame('Before', DB::table('lessons')->where('id', $q1)->value('title'));
         // Q2 is no longer active, so it opens up.
         $this->actingAs($tina)->patchJson('/api/lessons/'.DB::table('lessons')->where('quarter_number', 2)->value('id'), ['title' => 'Now editable'])->assertOk();
+    }
+
+    public function test_only_upcoming_quarter_content_can_change_even_without_records(): void
+    {
+        [$tina, $reading, $domain, $q1] = $this->quarterTwoActive();
+        $year = SchoolYear::active();
+        DB::table('quarters')->where(['school_year_id' => $year->id, 'quarter_number' => 1])->update(['status' => 'completed']);
+        DB::table('quarters')->insert(['school_year_id' => $year->id, 'quarter_number' => 3, 'name' => 'Q3', 'start_date' => '2027-01-01', 'end_date' => '2027-02-28', 'status' => 'upcoming']);
+        $lesson = fn (int $quarter, string $title, ?string $video = null) => DB::table('lessons')->insertGetId(['module_domain_id' => $domain, 'title' => $title, 'quarter_number' => $quarter, 'week_number' => 1, 'day_of_week' => 2, 'sequence_order' => 1, 'lesson_video_url' => $video]);
+        $disk = Storage::fake('public');
+        $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+        $as = $this->actingAs($tina);
+
+        // Completed Q1 and Q4, which the year hasn't set up: unused content, and still nothing in them can be added,
+        // changed or removed. Rows stay as they were, existing videos stay, and rejected uploads leave nothing behind.
+        $rejected = [
+            1 => 'The 1st Quarter is completed, so its lessons and practical activities can no longer be changed.',
+            4 => "The 4th Quarter isn't set up in the active school year, so its lessons and practical activities can't be changed yet. Set its dates in Manage Quarters first.",
+        ];
+        foreach ($rejected as $quarter => $message) {
+            $plain = $quarter === 1 ? $q1 : $lesson($quarter, "Lesson Q{$quarter}");
+            $disk->put("lesson-videos/q{$quarter}.mp4", 'x');
+            $disk->put("practical-demos/q{$quarter}.mp4", 'x');
+            $withVideo = $lesson($quarter, 'With video', "lesson-videos/q{$quarter}.mp4");
+            $hop = $this->practical($plain, "Hop Q{$quarter}");
+            DB::table('practical_activity_details')->where('activity_id', $hop)->update(['demo_video_url' => "practical-demos/q{$quarter}.mp4"]);
+            $files = $disk->allFiles();
+            $snapshot = fn () => [DB::table('lessons')->count(), DB::table('activities')->count(), $this->recordSnapshot([$plain, $withVideo], [$hop], [])];
+            $before = $snapshot();
+            $error = ['quarter' => $message];
+
+            $as->post("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'New', 'quarter' => $quarter, 'week' => 2, 'day' => 1, 'video' => $video()], ['Accept' => 'application/json'])
+                ->assertStatus(422)->assertJsonValidationErrors($error);
+            $as->patchJson("/api/lessons/{$plain}", ['title' => 'Renamed', 'description' => 'Changed'])->assertStatus(422)->assertJsonValidationErrors($error);
+            $as->post("/api/lessons/{$plain}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
+            $as->deleteJson("/api/lessons/{$withVideo}/video")->assertStatus(422)->assertJsonValidationErrors($error);
+            $as->post("/api/lessons/{$plain}/practical-activities", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
+            $as->post("/api/practical-activities/{$hop}", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
+            $as->deleteJson("/api/practical-activities/{$hop}")->assertStatus(422)->assertJsonValidationErrors($error);
+
+            $this->assertEquals($before, $snapshot());
+            $this->assertEqualsCanonicalizing($files, $disk->allFiles());
+        }
+
+        // Still viewable, videos included, and the UI gets each configured quarter's status.
+        $this->assertContains($q1, array_column(collect($as->getJson('/api/modules')->assertOk()->json())->firstWhere('id', $reading)['lessons'], 'id'));
+        $week = collect($as->getJson("/api/modules/{$reading}/lessons?quarter=1&week=1")->assertOk()->json());
+        $this->assertSame(['Hop Q1'], array_column($week->firstWhere('lessonId', $q1)['activities'], 'activityName'));
+        $as->getJson('/api/school-years/active')->assertOk()
+            ->assertJson(['quarterStatuses' => [1 => 'completed', 2 => 'active', 3 => 'upcoming']])->assertJsonMissingPath('quarterStatuses.4');
+
+        // Upcoming Q3 is prepared as before.
+        $id = $lesson(3, 'Lesson Q3');
+        $as->postJson("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'New', 'quarter' => 3, 'week' => 2, 'day' => 1])->assertCreated();
+        $as->patchJson("/api/lessons/{$id}", ['title' => 'Renamed'])->assertOk();
+        $as->post("/api/lessons/{$id}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertOk();
+        $as->deleteJson("/api/lessons/{$id}/video")->assertOk();
+        $jump = $as->postJson("/api/lessons/{$id}/practical-activities", $payload)->assertCreated()->json('id');
+        $as->postJson("/api/practical-activities/{$jump}", ['name' => 'Jump high'] + $payload)->assertOk();
+        $as->deleteJson("/api/practical-activities/{$jump}")->assertOk();
+    }
+
+    public function test_no_active_school_year_blocks_curriculum_changes(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+        SchoolYear::active()->update(['status' => 'completed']);
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+
+        // Q1 was upcoming in that year, but with no year active no quarter is being prepared.
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'Renamed'])->assertStatus(422)->assertJsonValidationErrors(['quarter' => "The 1st Quarter isn't set up"]);
+        $this->actingAs($tina)->postJson("/api/lessons/{$q1}/practical-activities", $payload)->assertStatus(422)->assertJsonValidationErrors('quarter');
+        $this->assertSame(['Lesson Q1', 0], [DB::table('lessons')->where('id', $q1)->value('title'), DB::table('activities')->where('lesson_id', $q1)->count()]);
+    }
+
+    public function test_an_open_edit_is_rejected_once_its_quarter_is_completed(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+        $year = SchoolYear::active();
+        // After Q1's end date (2026-12-31), so leaving the active state completes it.
+        Carbon::setTestNow('2027-01-15 09:00');
+
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'Before'])->assertOk();
+        // While the form stays open, Q1 runs as the active quarter and then gives way to Q2.
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/quarters/1/activate")->assertOk();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}/quarters/2/activate")->assertOk();
+        $this->assertSame('completed', DB::table('quarters')->where(['school_year_id' => $year->id, 'quarter_number' => 1])->value('status'));
+
+        $this->actingAs($tina)->patchJson("/api/lessons/{$q1}", ['title' => 'After'])->assertStatus(422)->assertJsonValidationErrors(['quarter' => 'The 1st Quarter is completed']);
+        $this->assertSame('Before', DB::table('lessons')->where('id', $q1)->value('title'));
     }
 
     public function test_lesson_edits_take_the_quarter_lock(): void

@@ -648,14 +648,24 @@ class CurriculumController extends Controller
         return $byModule;
     }
 
-    // The active quarter's lessons and practical activities are in use by classes, so they're read-only;
-    // teachers prepare the other quarters. Pass every quarter a change touches (both ends of a move).
-    // Call inside a transaction after Quarter::lockState(), so an activation can't land before the write.
+    // Teachers prepare lessons and practical activities only in an upcoming quarter of the active school year.
+    // The active quarter is in use by classes and a completed one is done, so both are read-only, and so is a
+    // quarter the active year hasn't set up (or any quarter when no year is active). Pass every quarter a change
+    // touches (both ends of a move); null (a missing lesson) is left to the caller's 404. Call inside a
+    // transaction after Quarter::lockState(), so an activation can't land before the write.
     private function ensureQuarterEditable(?int ...$quarters): void
     {
-        $active = Quarter::activeNumber();
-        if ($active !== null && in_array($active, $quarters, true)) {
-            throw ValidationException::withMessages(['quarter' => "The {$this->quarterName($active)} is open for classes, so its lessons and practical activities can't be changed. Activate another quarter to edit them."]);
+        $statuses = Quarter::statuses();
+        foreach (array_filter($quarters, fn (?int $quarter) => $quarter !== null) as $quarter) {
+            $message = match ($statuses[$quarter] ?? null) {
+                'upcoming' => null,
+                'active' => "The {$this->quarterName($quarter)} is active and open for classes, so its lessons and practical activities are read-only.",
+                'completed' => "The {$this->quarterName($quarter)} is completed, so its lessons and practical activities can no longer be changed.",
+                default => "The {$this->quarterName($quarter)} isn't set up in the active school year, so its lessons and practical activities can't be changed yet. Set its dates in Manage Quarters first.",
+            };
+            if ($message) {
+                throw ValidationException::withMessages(['quarter' => $message]);
+            }
         }
     }
 

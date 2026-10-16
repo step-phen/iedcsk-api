@@ -34,6 +34,8 @@ class SchoolYearController extends Controller
                 'activeQuarter' => Quarter::where('school_year_id', $year->id)->where('status', 'active')->value('name'),
                 // What the Modules page compares its quarter tabs (1-4) against.
                 'activeQuarterNumber' => Quarter::where('school_year_id', $year->id)->where('status', 'active')->value('quarter_number'),
+                // quarter number => upcoming|active|completed, configured quarters only: the Modules page locks active and completed ones.
+                'quarterStatuses' => Quarter::where('school_year_id', $year->id)->pluck('status', 'quarter_number'),
             ])
             : JsonResponse::fromJsonString('null');
     }
