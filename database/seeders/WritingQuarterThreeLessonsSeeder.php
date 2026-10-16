@@ -14,6 +14,12 @@ class WritingQuarterThreeLessonsSeeder extends Seeder
         [1, 1, 1, 'Tracing Capital Letter D', 'Learners combine taught strokes to trace capital D with increasing control.'],
         [1, 3, 2, 'Tracing Capital Letter O', 'Learners combine taught strokes to trace capital O with increasing control.'],
         [1, 5, 3, 'Tracing Capital Letter P', 'Learners combine taught strokes to trace capital P with increasing control.'],
+        [2, 1, 4, 'Tracing Capital Letter U', 'Learners combine taught strokes to trace capital U with increasing control.'],
+        [2, 3, 5, 'Tracing Capital Letter G', 'Learners combine taught strokes to trace capital G with increasing control.'],
+        [2, 5, 6, 'Tracing Capital Letter J', 'Learners combine taught strokes to trace capital J with increasing control.'],
+        [3, 1, 7, 'Tracing Capital Letter R', 'Learners combine taught strokes to trace capital R with increasing control.'],
+        [3, 3, 8, 'Tracing Capital Letter S', 'Learners combine taught strokes to trace capital S with increasing control.'],
+        [3, 5, 9, 'Tracing Capital Letter Q', 'Learners combine taught strokes to trace capital Q with increasing control.'],
     ];
 
     public function run(): void

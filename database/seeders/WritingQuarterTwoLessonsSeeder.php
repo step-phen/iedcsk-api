@@ -14,6 +14,12 @@ class WritingQuarterTwoLessonsSeeder extends Seeder
         [1, 1, 1, 'Exploring Capital Letter Shapes', 'Learners notice how familiar strokes form capital letters and follow modeled letter movements.'],
         [1, 3, 2, 'Tracing Capital Letter T', 'Learners combine taught strokes to trace capital T with increasing control.'],
         [1, 5, 3, 'Tracing Capital Letter L', 'Learners combine taught strokes to trace capital L with increasing control.'],
+        [2, 1, 4, 'Tracing Capital Letter I', 'Learners combine taught strokes to trace capital I with increasing control.'],
+        [2, 3, 5, 'Tracing Capital Letter H', 'Learners combine taught strokes to trace capital H with increasing control.'],
+        [2, 5, 6, 'Tracing Capital Letter F', 'Learners combine taught strokes to trace capital F with increasing control.'],
+        [3, 1, 7, 'Tracing Capital Letter E', 'Learners combine taught strokes to trace capital E with increasing control.'],
+        [3, 3, 8, 'Tracing Capital Letter V', 'Learners combine taught strokes to trace capital V with increasing control.'],
+        [3, 5, 9, 'Tracing Capital Letter X', 'Learners combine taught strokes to trace capital X with increasing control.'],
     ];
 
     public function run(): void
