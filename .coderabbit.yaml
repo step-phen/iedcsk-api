@@ -1,0 +1,6 @@
+# Let CodeRabbit submit "Request changes" / "Approve" reviews instead of plain comments.
+reviews:
+  request_changes_workflow: true
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
