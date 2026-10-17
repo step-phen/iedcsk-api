@@ -17,6 +17,21 @@ class ReadingQuarterFourLessonsSeeder extends Seeder
         [2, 1, 1, 'Understanding a Short Decodable Story', 'Learners read a short story using taught words and identify its main events with picture support.'],
         [2, 3, 2, 'Recognizing Rhyming Words', 'Learners listen for matching ending sounds in familiar spoken words.'],
         [2, 5, 3, 'Identifying Parts of a Book', 'Learners identify the front cover, title, and pages of a familiar book.'],
+        [3, 1, 1, 'Applying Consonant Sounds', 'Learners use previously taught consonant sounds when recognizing familiar picture names and words.'],
+        [3, 3, 2, 'Reading CVC Words with All Five Short Vowels', 'Learners blend familiar CVC words containing short a, e, i, o, and u.'],
+        [3, 5, 3, 'Reading a Short Text Aloud', 'Learners apply taught word-reading skills to a brief decodable text.'],
+        [4, 1, 1, 'Finding Familiar Words in a Text', 'Learners locate taught words in a short phrase, sentence, or passage.'],
+        [4, 3, 2, 'Answering Questions About a Short Story', 'Learners identify who, what, and where details in a short story using picture choices.'],
+        [4, 5, 3, 'Reviewing Reading and Comprehension Skills', 'Learners review taught CVC words, short phrases, rhymes, book parts, and story details.'],
+        [5, 1, 1, 'Sequencing Story Events', 'Learners identify the beginning, middle, and end of a familiar short story.'],
+        [5, 3, 2, 'Matching Sentences to Pictures', 'Learners connect short sentences containing taught words with their meaning.'],
+        [5, 5, 3, 'Retelling a Familiar Read Story', 'Learners recall and share the main events of a short story using picture support.'],
+        [6, 1, 1, 'Sorting Words by Short Vowel Sound', 'Learners distinguish the middle vowel sounds in familiar CVC words.'],
+        [6, 3, 2, 'Reading and Responding to a Sentence', 'Learners read a simple sentence and respond to its meaning through a familiar action.'],
+        [6, 5, 3, 'Identifying Story Characters and Setting', 'Learners identify who is in a short story and where the events happen.'],
+        [7, 1, 1, 'Applying Reading Skills to a New Short Text', 'Learners use taught words and sounds to read an unfamiliar brief decodable text.'],
+        [7, 3, 2, 'Reviewing Fourth-Quarter Reading Skills', 'Learners review taught short vowels, CVC words, sentences, rhymes, book parts, and story comprehension.'],
+        [7, 5, 3, 'Assessing Fourth-Quarter Reading Skills', 'Learners demonstrate taught word-reading and comprehension skills using a brief decodable text.'],
     ];
 
     public function run(): void
@@ -34,7 +49,7 @@ class ReadingQuarterFourLessonsSeeder extends Seeder
             foreach (self::LESSONS as [$week, $day, $order, $title, $description]) {
                 DB::table('lessons')->updateOrInsert(
                     ['module_domain_id' => $moduleDomainId, 'quarter_number' => 4, 'week_number' => $week, 'day_of_week' => $day],
-                    ['title' => $title, 'description' => $description, 'sequence_order' => $order, 'is_active' => true, 'updated_at' => now()],
+                    ['title' => $title, 'description' => $description, 'sequence_order' => $order, 'updated_at' => now()],
                 );
             }
         });

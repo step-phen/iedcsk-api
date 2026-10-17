@@ -26,6 +26,9 @@ class LanguageQuarterFourLessonsSeeder extends Seeder
         [5, 1, 1, 'Recognizing Actions in Pictures', 'Learners match spoken action sentences to pictures.'],
         [5, 3, 2, 'Sequencing Familiar Events', 'Learners arrange familiar events in order.'],
         [5, 5, 3, 'Recognizing Needs and Feelings', 'Learners identify suitable expressions for familiar situations.'],
+        [6, 1, 1, 'Choosing a Relevant Question', 'Learners recognize suitable who, what, or where questions.'],
+        [6, 3, 2, 'Choosing a Conversation Response', 'Learners identify relevant replies in short conversations.'],
+        [6, 5, 3, 'Matching Sentences to Story Events', 'Learners connect spoken sentences with story pictures.'],
     ];
 
     public function run(): void
@@ -43,7 +46,7 @@ class LanguageQuarterFourLessonsSeeder extends Seeder
             foreach (self::LESSONS as [$week, $day, $order, $title, $description]) {
                 DB::table('lessons')->updateOrInsert(
                     ['module_domain_id' => $moduleDomainId, 'quarter_number' => 4, 'week_number' => $week, 'day_of_week' => $day],
-                    ['title' => $title, 'description' => $description, 'sequence_order' => $order, 'is_active' => true, 'updated_at' => now()],
+                    ['title' => $title, 'description' => $description, 'sequence_order' => $order, 'updated_at' => now()],
                 );
             }
         });
