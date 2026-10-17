@@ -6,7 +6,7 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
-// Shared by the Reading Q3 and Q4 games; each subclass names its activity, lesson day and rounds.
+// Shared by the Reading Q3/Q4 and Language Q4 games; each subclass names its activity, lesson day and rounds.
 abstract class ReadingQuarterThreeGameSeeder extends Seeder
 {
     protected const CODE = '';
@@ -20,6 +20,8 @@ abstract class ReadingQuarterThreeGameSeeder extends Seeder
     protected const CHECKLIST_ITEM = '';
 
     protected const GAME_TYPE = 'tap_choice';
+
+    protected const MODULE = 'reading';
 
     protected const QUARTER = 3;
 
@@ -37,11 +39,11 @@ abstract class ReadingQuarterThreeGameSeeder extends Seeder
         $lessonId = DB::table('lessons')
             ->join('module_domains', 'module_domains.id', '=', 'lessons.module_domain_id')
             ->join('modules', 'modules.id', '=', 'module_domains.module_id')
-            ->where(['modules.code' => 'reading', 'lessons.quarter_number' => static::QUARTER, 'lessons.week_number' => static::WEEK, 'lessons.day_of_week' => static::DAY, 'lessons.is_active' => true])
+            ->where(['modules.code' => static::MODULE, 'lessons.quarter_number' => static::QUARTER, 'lessons.week_number' => static::WEEK, 'lessons.day_of_week' => static::DAY, 'lessons.is_active' => true])
             ->orderBy('lessons.sequence_order')
             ->value('lessons.id');
         if (! $lessonId) {
-            throw new RuntimeException('Add the Reading lesson for Quarter '.static::QUARTER.', Week '.static::WEEK.', '.$days[static::DAY].' first.');
+            throw new RuntimeException('Add the '.ucfirst(static::MODULE).' lesson for Quarter '.static::QUARTER.', Week '.static::WEEK.', '.$days[static::DAY].' first.');
         }
 
         DB::transaction(function () use ($lessonId) {
