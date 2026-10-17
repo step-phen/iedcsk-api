@@ -49,7 +49,7 @@ class ReadingQuarterFourLessonsSeeder extends Seeder
             foreach (self::LESSONS as [$week, $day, $order, $title, $description]) {
                 DB::table('lessons')->updateOrInsert(
                     ['module_domain_id' => $moduleDomainId, 'quarter_number' => 4, 'week_number' => $week, 'day_of_week' => $day],
-                    ['title' => $title, 'description' => $description, 'sequence_order' => $order, 'is_active' => true, 'updated_at' => now()],
+                    ['title' => $title, 'description' => $description, 'sequence_order' => $order, 'updated_at' => now()],
                 );
             }
         });
