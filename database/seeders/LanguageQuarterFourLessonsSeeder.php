@@ -29,6 +29,9 @@ class LanguageQuarterFourLessonsSeeder extends Seeder
         [6, 1, 1, 'Choosing a Relevant Question', 'Learners recognize suitable who, what, or where questions.'],
         [6, 3, 2, 'Choosing a Conversation Response', 'Learners identify relevant replies in short conversations.'],
         [6, 5, 3, 'Matching Sentences to Story Events', 'Learners connect spoken sentences with story pictures.'],
+        [7, 1, 1, 'Understanding Picture Descriptions', 'Learners recognize descriptions and answers about a scene.'],
+        [7, 3, 2, 'Reviewing Fourth-Quarter Language Skills', 'Learners review sounds, vocabulary, stories, and directions.'],
+        [7, 5, 3, 'Assessing Fourth-Quarter Language Skills', 'Learners demonstrate taught listening and vocabulary skills.'],
     ];
 
     public function run(): void
