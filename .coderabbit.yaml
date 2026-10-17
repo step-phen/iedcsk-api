@@ -1,0 +1,6 @@
+# Approve once all CodeRabbit comments are resolved so the PR loop has a clear done signal.
+reviews:
+  request_changes_workflow: true
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
