@@ -17,6 +17,8 @@ class LearnerSessionController extends Controller
 {
     private const PLAYABLE = ['present', 'late'];
 
+    public const VIDEO_MISSING = 'This activity is not yet available. Please wait for your teacher to add the video.';
+
     // Names on the picker: present or late learners (today's attendance before class, the class roster during it), minus anyone mid-activity.
     public function learners(Request $request): JsonResponse
     {
@@ -141,7 +143,7 @@ class LearnerSessionController extends Controller
             }
         }
 
-        $isDemonstration = $active?->activity_format === 'practical' && $active->demo_video_url;
+        $isDemonstration = ClassSession::demoVideoReady($active);
 
         return response()->json([
             'active' => true,
@@ -156,7 +158,9 @@ class LearnerSessionController extends Controller
             'activityCode' => $active?->activity_code,
             'activityType' => $isDemonstration ? 'demonstration' : $active?->game_type,
             'activityFormat' => $active?->activity_format,
-            'activityVideoUrl' => ClassSession::fileUrl($active?->demo_video_url),
+            'activityVideoUrl' => $isDemonstration ? ClassSession::fileUrl($active->demo_video_url) : null,
+            // A practical activity without a saved, reachable demo video: START stays locked until the teacher adds one.
+            'activityLocked' => ClassSession::practicalLocked($active),
             'activityInstructions' => $active?->activity_instructions,
             'participantStatus' => $participantStatus,
             'startedAt' => Carbon::parse($session->started_at)->toIso8601String(),
@@ -201,6 +205,9 @@ class LearnerSessionController extends Controller
         $active = ClassSession::activeActivity($session->id);
         if (! $active) {
             return response()->json(['message' => 'Your teacher has not picked an activity yet.'], 400);
+        }
+        if (ClassSession::practicalLocked($active)) {
+            return response()->json(['message' => self::VIDEO_MISSING], 423);
         }
 
         $outcome = DB::transaction(function () use ($session, $row, $active) {
@@ -302,6 +309,10 @@ class LearnerSessionController extends Controller
         [$stored, $active, $error] = $this->playing($request, (int) $data['activityId'], 'practical');
         if ($error) {
             return $error;
+        }
+        // Checked again on submit: a learner who joined earlier can't finish one whose video is gone.
+        if (ClassSession::practicalLocked($active)) {
+            return response()->json(['message' => self::VIDEO_MISSING], 423);
         }
 
         return $this->complete($stored, $active, ['status' => 'submitted', 'demo_watched_at' => now()])

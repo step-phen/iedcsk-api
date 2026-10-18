@@ -12,6 +12,7 @@ use App\Http\Requests\UpdateLessonRequest;
 use App\Models\Quarter;
 use App\Models\SchoolYear;
 use App\Models\Teacher;
+use App\Support\ClassSession;
 use Illuminate\Container\Attributes\CurrentUser;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -406,6 +407,7 @@ class CurriculumController extends Controller
     }
 
     // Attaches a video to a lesson that has none; to replace one, remove it first (destroyLessonVideo).
+    // Also allowed in the active quarter, where it is the only change a lesson can take (ensureVideoAttachable).
     public function storeLessonVideo(StoreLessonVideoRequest $request, int $lesson): JsonResponse
     {
         $current = DB::table('lessons')->where(['id' => $lesson, 'is_active' => true])->first(['lesson_video_url']);
@@ -414,13 +416,17 @@ class CurriculumController extends Controller
             throw ValidationException::withMessages(['video' => 'This lesson already has a video.']);
         }
 
-        $path = $request->file('video')->store('lesson-videos', 'public');
+        $path = $this->storeVideo($request, 'lesson-videos');
         try {
             DB::transaction(function () use ($lesson, $path) {
                 Quarter::lockState();
-                $this->ensureQuarterEditable($this->lessonQuarter($lesson));
-                $this->ensureNoRecords($this->lessonsWithRecords([$lesson]) !== []);
-                DB::table('lessons')->where('id', $lesson)->update(['lesson_video_url' => $path, 'updated_at' => now()]);
+                $this->ensureVideoAttachable($this->lessonQuarter($lesson), fn () => $this->lessonsWithRecords([$lesson]) !== []);
+                // Only while it still has none, so a second upload racing this one can't overwrite it.
+                $saved = DB::table('lessons')->where(['id' => $lesson, 'is_active' => true])->whereNull('lesson_video_url')
+                    ->update(['lesson_video_url' => $path, 'updated_at' => now()]);
+                if (! $saved) {
+                    throw ValidationException::withMessages(['video' => 'This lesson already has a video.']);
+                }
             });
         } catch (\Throwable $e) {
             Storage::disk('public')->delete($path);
@@ -505,6 +511,47 @@ class CurriculumController extends Controller
         return response()->json($this->weekActivity($this->activityRows()->where('activities.id', $activity)->first()));
     }
 
+    // Attaches the demonstration video to a practical activity that has none. Learners can't start the activity
+    // without one (LearnerSessionController::join), so the active quarter allows this, and only this (ensureVideoAttachable).
+    public function storePracticalActivityVideo(StoreLessonVideoRequest $request, int $activity): JsonResponse
+    {
+        $current = $this->activityRows()->where(['activities.id' => $activity, 'activities.activity_format' => 'practical'])->first();
+        abort_if(! $current, 404);
+        if ($current->demo_video_url) {
+            throw ValidationException::withMessages(['video' => 'This practical activity already has a video.']);
+        }
+
+        $path = $this->storeVideo($request, 'practical-demos');
+        try {
+            DB::transaction(function () use ($activity, $current, $path) {
+                Quarter::lockState();
+                $this->ensureVideoAttachable($this->lessonQuarter($current->lesson_id), fn () => $this->activitiesWithRecords([$activity]) !== []);
+                // Only the video column, and only while it is still empty: nothing else about the activity changes.
+                $saved = DB::table('practical_activity_details')->where('activity_id', $activity)->whereNull('demo_video_url')
+                    ->update(['demo_video_url' => $path, 'updated_at' => now()]);
+                if (! $saved) {
+                    throw ValidationException::withMessages(['video' => 'This practical activity already has a video.']);
+                }
+            });
+        } catch (\Throwable $e) {
+            Storage::disk('public')->delete($path);
+            throw $e;
+        }
+
+        return response()->json($this->weekActivity($this->activityRows()->where('activities.id', $activity)->first()));
+    }
+
+    // Stores an uploaded video on the public disk, failing the request unless the file is really there.
+    private function storeVideo(StoreLessonVideoRequest $request, string $folder): string
+    {
+        $path = $request->file('video')->store($folder, 'public');
+        if (! $path || ! Storage::disk('public')->exists($path)) {
+            throw ValidationException::withMessages(['video' => 'The video could not be saved. Please try again.']);
+        }
+
+        return $path;
+    }
+
     // Hides a practical activity everywhere new work starts; past results stay, and skills linked to it are unlinked.
     public function destroyPracticalActivity(int $activity): JsonResponse
     {
@@ -547,6 +594,8 @@ class CurriculumController extends Controller
             'instructions' => $a->instructions,
             'teacherGuidelines' => $a->teacher_guidelines,
             'demoVideoUrl' => $this->videoUrl($a->demo_video_url),
+            // Saved and on disk: what learners need before they can start it (ClassSession::demoVideoReady).
+            'demoVideoReady' => ClassSession::demoVideoReady($a),
         ] : []);
     }
 
@@ -667,6 +716,18 @@ class CurriculumController extends Controller
                 throw ValidationException::withMessages(['quarter' => $message]);
             }
         }
+    }
+
+    // Attaching a first video. The active quarter allows this (and no other change): it only adds what learners
+    // watch and changes no result, so a lesson already taught can still get one. Every other quarter keeps the usual
+    // edit rules. Call inside a transaction after Quarter::lockState(), like ensureQuarterEditable.
+    private function ensureVideoAttachable(?int $quarter, \Closure $hasRecords): void
+    {
+        if ($quarter !== null && (Quarter::statuses()[$quarter] ?? null) === 'active') {
+            return;
+        }
+        $this->ensureQuarterEditable($quarter);
+        $this->ensureNoRecords($hasRecords());
     }
 
     // Content used in a class or by a learner stays as it was, whichever quarter is active now: changing it

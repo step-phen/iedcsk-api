@@ -7,7 +7,9 @@ use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ClassroomSessionTest extends TestCase
@@ -30,6 +32,8 @@ class ClassroomSessionTest extends TestCase
         $this->withHeader('Referer', 'http://localhost:3000/');
 
         $this->seed(CurriculumSeeder::class);
+        // Practical demos must be real files on the public disk before learners can start them.
+        Storage::fake('public')->put('practical-demos/hop.mp4', 'x');
         $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-03-31', 'status' => 'active']);
         $this->tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
         $this->joy = $this->setUpSections($this->tina)['Joy'];
@@ -67,7 +71,7 @@ class ClassroomSessionTest extends TestCase
             $question('q2', 2, 'b', true);
             $question('q3', 3, 'd', false);
         } else {
-            DB::table('practical_activity_details')->insert(['activity_id' => $id, 'demo_video_url' => '/demonstrations/hop.mp4', 'teacher_guidelines' => '-']);
+            DB::table('practical_activity_details')->insert(['activity_id' => $id, 'demo_video_url' => 'practical-demos/hop.mp4', 'teacher_guidelines' => '-']);
         }
 
         return $id;
@@ -266,7 +270,7 @@ class ClassroomSessionTest extends TestCase
 
         $this->device()->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
         $this->getJson("/api/classroom-session?learnerId={$this->kids['Ana']}")
-            ->assertJson(['activityFormat' => 'practical', 'activityType' => 'demonstration', 'activityVideoUrl' => '/demonstrations/hop.mp4']);
+            ->assertJson(['activityFormat' => 'practical', 'activityType' => 'demonstration', 'activityVideoUrl' => asset('storage/practical-demos/hop.mp4'), 'activityLocked' => false]);
         $this->postJson('/api/classroom-session/finish', ['activityId' => $hop, 'answers' => [['questionId' => 'a', 'response' => 'b']]])->assertStatus(400);
 
         $rate = fn (string $result) => $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/classroom/practical-rating", ['learnerId' => $this->kids['Ana'], 'activityId' => $hop, 'result' => $result, 'remarks' => ' Hopped well ']);
@@ -292,6 +296,70 @@ class ClassroomSessionTest extends TestCase
 
         $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
         $this->getJson("/api/classroom-session/practical-result?activityId={$hop}")->assertExactJson(['rated' => true, 'result' => 'good']);
+    }
+
+    public function test_a_practical_activity_without_a_video_is_locked_for_learners(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $hop = $this->activity('MP-Q1W1-01', 'practical');
+        DB::table('practical_activity_details')->where('activity_id', $hop)->update(['demo_video_url' => null]);
+        $this->start($hop)->assertOk();
+        $status = fn () => $this->getJson("/api/classroom-session?learnerId={$this->kids['Ana']}")->assertOk();
+        $locked = 'This activity is not yet available. Please wait for your teacher to add the video.';
+
+        // Every call goes straight to the API: Locked, and nothing is started or recorded.
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $status()->assertJson(['activityFormat' => 'practical', 'activityLocked' => true, 'activityVideoUrl' => null]);
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertStatus(423)->assertJson(['message' => $locked]);
+        $this->postJson('/api/classroom-session/demonstration', ['activityId' => $hop])->assertStatus(423);
+        $this->assertSame([0, 0], [DB::table('learner_activity_assignments')->count(), DB::table('learner_activity_attempts')->count()]);
+        $this->assertTrue($this->board()['activeSession']['activeActivityNeedsVideo']);
+
+        // A file that never saved doesn't unlock it: the upload fails and the activity stays Locked.
+        $upload = fn (UploadedFile $file) => $this->actingAs($this->tina)->post("/api/practical-activities/{$hop}/video", ['video' => $file], ['Accept' => 'application/json']);
+        $upload(UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf'))->assertJsonValidationErrors('video');
+        $this->assertNull(DB::table('practical_activity_details')->where('activity_id', $hop)->value('demo_video_url'));
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $status()->assertJson(['activityLocked' => true]);
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertStatus(423);
+
+        // A saved path whose file is missing doesn't count as a video either.
+        DB::table('practical_activity_details')->where('activity_id', $hop)->update(['demo_video_url' => 'practical-demos/gone.mp4']);
+        $status()->assertJson(['activityLocked' => true, 'activityVideoUrl' => null]);
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertStatus(423);
+        DB::table('practical_activity_details')->where('activity_id', $hop)->update(['demo_video_url' => null]);
+
+        // The teacher uploads the video mid-class (Q1 is active): learners can start and submit it now.
+        $upload(UploadedFile::fake()->create('hop.mp4', 512, 'video/mp4'))->assertOk()->assertJson(['demoVideoReady' => true]);
+        $this->assertFalse($this->board()['activeSession']['activeActivityNeedsVideo']);
+        $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $status()->assertJson(['activityLocked' => false, 'activityType' => 'demonstration']);
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $this->postJson('/api/classroom-session/demonstration', ['activityId' => $hop])->assertOk();
+    }
+
+    public function test_a_joined_learner_cannot_submit_a_practical_whose_video_is_gone(): void
+    {
+        $this->quarter();
+        $this->markEveryonePresent();
+        $hop = $this->activity('MP-Q1W1-01', 'practical');
+        $this->start($hop)->assertOk();
+        $this->joinAs('Ana')->assertOk();
+        $rows = fn () => [
+            DB::table('learner_activity_assignments')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+            DB::table('learner_activity_attempts')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all(),
+        ];
+        $before = $rows();
+        $this->assertCount(1, $before[1]);
+
+        // The file is gone after Ana joined: her direct submit is refused, and no attempt, score or status changes.
+        Storage::disk('public')->delete('practical-demos/hop.mp4');
+        $this->postJson('/api/classroom-session/demonstration', ['activityId' => $hop])->assertStatus(423)
+            ->assertJson(['message' => 'This activity is not yet available. Please wait for your teacher to add the video.']);
+        $this->assertSame($before, $rows());
+        $this->assertSame(['in_progress', null, null], [$rows()[1][0]['status'], $rows()[1][0]['demo_watched_at'], $rows()[1][0]['score']]);
+        $this->assertSame(0, DB::table('notifications')->count());
     }
 
     public function test_the_modules_board_badge_follows_a_real_class(): void

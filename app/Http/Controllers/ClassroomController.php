@@ -37,6 +37,8 @@ class ClassroomController extends Controller
                 'activeActivityName' => $active?->activity_name,
                 'activeLessonTitle' => $active?->lesson_title,
                 'activeActivityFormat' => $active?->activity_format,
+                // Learners see this practical activity as Locked until its demo video is saved.
+                'activeActivityNeedsVideo' => ClassSession::practicalLocked($active),
             ] : null,
             'modules' => $this->modules($section->id, $section->school_year_id),
             'attendance' => (object) DB::table('attendance')

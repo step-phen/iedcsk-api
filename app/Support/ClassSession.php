@@ -5,6 +5,7 @@ namespace App\Support;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 // Queries shared by the teacher's classroom and the learner devices for one classroom_sessions row.
 class ClassSession
@@ -92,5 +93,22 @@ class ClassSession
         }
 
         return str_starts_with($path, '/') || str_starts_with($path, 'http') ? $path : asset('storage/'.$path);
+    }
+
+    // A practical activity opens to learners only once its demo is an uploaded file that is really on the public disk:
+    // a saved path whose file went missing, or a link the API can't check, keeps it locked.
+    public static function demoVideoReady(?object $activity): bool
+    {
+        $path = $activity?->demo_video_url;
+
+        return $activity?->activity_format === 'practical' && $path
+            && ! str_starts_with($path, '/') && ! str_starts_with($path, 'http')
+            && Storage::disk('public')->exists($path);
+    }
+
+    // The practical activity on screen has no usable demo, so learners can't start or submit it.
+    public static function practicalLocked(?object $activity): bool
+    {
+        return $activity?->activity_format === 'practical' && ! self::demoVideoReady($activity);
     }
 }
