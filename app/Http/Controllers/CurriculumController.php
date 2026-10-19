@@ -28,6 +28,8 @@ class CurriculumController extends Controller
     // The only grade level the app supports.
     public const GRADE_LEVEL = 'Kindergarten';
 
+    public const MODULE_LOCKED = 'Modules cannot be added after the school year has started. New modules can be added once the next school year is activated, before its first quarter begins.';
+
     public const DAY_NAMES = [1 => 'MONDAY', 2 => 'TUESDAY', 3 => 'WEDNESDAY', 4 => 'THURSDAY', 5 => 'FRIDAY', 6 => 'SATURDAY', 7 => 'SUNDAY'];
 
     // Codes are derived from names ("Science Explorers" -> "science_explorers"), never typed by the teacher.
@@ -167,7 +169,7 @@ class CurriculumController extends Controller
 
         $key = ['enrollment_id' => $data['enrollmentId'], 'checklist_item_id' => $data['itemId'], 'quarter_id' => $quarterId];
         // A first rating makes the item protected, so it waits on the lock checklist item edits take.
-        DB::transaction(function () use ($key, $data, $teacher) {
+        DB::transaction(function () use ($key, $data, $teacher, $section) {
             Quarter::lockState();
             // Remarks live on the rating row, so clearing the rating clears its remarks too.
             if ($data['rating'] === null) {
@@ -179,6 +181,8 @@ class CurriculumController extends Controller
                     'assessed_at' => now(),
                     'updated_at' => now(),
                 ] + (array_key_exists('remarks', $data) ? ['remarks' => $data['remarks']] : []));
+                // A rating can be given before any quarter is active, so a first one starts the year too.
+                SchoolYear::markStarted($section->school_year_id);
             }
         });
         $remarks = DB::table('learner_developmental_checklists')->where($key)->value('remarks');
@@ -296,14 +300,22 @@ class CurriculumController extends Controller
     }
 
     // Adds a module linked to its domains and to every active-year section; its class time is set later in Class Schedule.
+    // Only before the active year has started (SchoolYear::markStarted); with no active year there is none to protect.
     public function storeModule(StoreModuleRequest $request): JsonResponse
     {
         $data = $request->validated();
         $name = trim($data['moduleName']);
         $newDomain = trim($data['newDomain'] ?? '');
-        $year = SchoolYear::active();
 
-        $moduleId = DB::transaction(function () use ($data, $name, $newDomain, $year) {
+        $moduleId = DB::transaction(function () use ($data, $name, $newDomain) {
+            // Read under both locks before anything is written: quarter activation and checklist ratings hold the
+            // quarter lock, and a first attendance mark or progress report holds the year row while it stamps started_at.
+            Quarter::lockState();
+            $year = SchoolYear::where('status', 'active')->lockForUpdate()->first();
+            if ($year?->started_at) {
+                throw ValidationException::withMessages(['schoolYear' => self::MODULE_LOCKED]);
+            }
+
             $domainIds = $data['domainIds'] ?? [];
             if ($newDomain !== '') {
                 $domainIds[] = DB::table('developmental_domains')->insertGetId([

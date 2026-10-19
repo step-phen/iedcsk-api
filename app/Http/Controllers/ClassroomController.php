@@ -7,6 +7,7 @@ use App\Http\Requests\SaveAttendanceRequest;
 use App\Http\Requests\StartClassRequest;
 use App\Models\Learner;
 use App\Models\Quarter;
+use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
 use App\Support\ClassSession;
@@ -172,6 +173,9 @@ class ClassroomController extends Controller
                         ->update(['attendance_status' => $status, 'attendance_recorded_by' => $teacher->id, 'attendance_recorded_at' => $now, 'updated_at' => $now]);
                 }
             }
+            // Attendance can be marked before any quarter is active, so a first mark starts the year too.
+            // Last, after the enrollment locks, so lock order stays enrollments then year.
+            SchoolYear::markStarted($section->school_year_id);
         });
 
         return response()->json(['success' => true]);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Quarter;
+use App\Models\SchoolYear;
 use App\Models\Teacher;
 use App\Support\ProgressReportDraft;
 use Illuminate\Container\Attributes\CurrentUser;
@@ -63,12 +64,14 @@ class ProgressReportController extends Controller
         ], ['quarter.exists' => 'This quarter has not been set up for the school year yet.']);
         $quarterId = DB::table('quarters')->where(['school_year_id' => $section->school_year_id, 'quarter_number' => $data['quarter']])->value('id');
 
-        [$id, $created] = DB::transaction(function () use ($data, $quarterId, $teacher) {
+        [$id, $created] = DB::transaction(function () use ($data, $quarterId, $teacher, $section) {
             $key = ['enrollment_id' => $data['enrollmentId'], 'quarter_id' => $quarterId];
             // A concurrent insert of the same key waits for this one and is then ignored.
             $created = DB::table('quarterly_progress_reports')->insertOrIgnore($key + ['teacher_id' => $teacher->id, 'status' => 'draft', 'generated_at' => now()]) > 0;
             $id = DB::table('quarterly_progress_reports')->where($key)->value('id');
             if ($created) {
+                // A report can be made before any quarter is active, so a first one starts the year too.
+                SchoolYear::markStarted($section->school_year_id);
                 $draft = ProgressReportDraft::build($this->report($teacher, $id));
                 DB::table('quarterly_progress_report_details')->insert(array_map(fn ($row, $moduleDomainId) => [
                     'report_id' => $id,

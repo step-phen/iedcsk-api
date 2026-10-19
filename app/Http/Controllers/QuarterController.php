@@ -167,6 +167,9 @@ class QuarterController extends Controller
             }
 
             $previous = Quarter::where('school_year_id', $schoolYear->id)->where('status', 'active')->lockForUpdate()->first();
+            // An active quarter means the year has started, for good: demoting the quarter later doesn't undo it.
+            // In this transaction, so a failed activation leaves the year unstarted.
+            SchoolYear::markStarted($schoolYear->id);
             if ($previous?->is($quarter)) {
                 return;
             }
