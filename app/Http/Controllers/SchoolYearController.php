@@ -36,6 +36,8 @@ class SchoolYearController extends Controller
                 'activeQuarterNumber' => Quarter::where('school_year_id', $year->id)->where('status', 'active')->value('quarter_number'),
                 // quarter number => upcoming|active|completed, configured quarters only: the Modules page locks active and completed ones.
                 'quarterStatuses' => Quarter::where('school_year_id', $year->id)->pluck('status', 'quarter_number'),
+                // False once the year has started (SchoolYear::markStarted): the Modules page disables Add Module.
+                'canAddModules' => $year->started_at === null,
             ])
             : JsonResponse::fromJsonString('null');
     }

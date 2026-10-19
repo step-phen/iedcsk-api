@@ -5,10 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @property Carbon|null $start_date
  * @property Carbon|null $end_date
+ * @property Carbon|null $started_at
  */
 class SchoolYear extends Model
 {
@@ -16,7 +18,16 @@ class SchoolYear extends Model
 
     protected function casts(): array
     {
-        return ['start_date' => 'date', 'end_date' => 'date'];
+        return ['start_date' => 'date', 'end_date' => 'date', 'started_at' => 'datetime'];
+    }
+
+    // Records that teaching began in this year: its first quarter activation, attendance mark, checklist rating
+    // or progress report. Call inside that write's transaction, so it only sticks if the write does. Set once,
+    // never cleared. The row lock it takes (first time only) is what storeModule waits on before it checks.
+    // Through DB::table so the year's updated_at stays as it was.
+    public static function markStarted(int $id): void
+    {
+        DB::table('school_years')->where('id', $id)->whereNull('started_at')->update(['started_at' => now()]);
     }
 
     public static function active(): ?self

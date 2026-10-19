@@ -447,12 +447,13 @@ class CurriculumTest extends TestCase
         $locked = ['quarter' => 'The 2nd Quarter is active and open for classes, so its lessons and practical activities are read-only.'];
         $as = $this->actingAs($tina);
 
-        // Q2 is open for classes: nothing in it can be added, changed or removed.
+        // Q2 is open for classes: nothing in it can be added, changed or removed, apart from a first video
+        // (test_active_quarter_allows_only_a_first_video).
         $lessonCount = DB::table('lessons')->count();
         $as->post("/api/modules/{$reading}/lessons", ['moduleDomainId' => $domain, 'title' => 'New', 'quarter' => 2, 'week' => 2, 'day' => 1, 'video' => $video()], ['Accept' => 'application/json'])
             ->assertStatus(422)->assertJsonValidationErrors($locked);
         $as->patchJson("/api/lessons/{$q2}", ['title' => 'Renamed', 'description' => 'Changed'])->assertStatus(422)->assertJsonValidationErrors($locked);
-        $as->post("/api/lessons/{$q2}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->post("/api/lessons/{$q2Video}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors('video');
         $as->deleteJson("/api/lessons/{$q2Video}/video")->assertStatus(422)->assertJsonValidationErrors($locked);
         $as->post("/api/lessons/{$q2}/practical-activities", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
         $as->post("/api/practical-activities/{$hop}", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
@@ -478,6 +479,93 @@ class CurriculumTest extends TestCase
         $jump = $as->postJson("/api/lessons/{$q1}/practical-activities", $payload)->assertCreated()->json('id');
         $as->postJson("/api/practical-activities/{$jump}", ['name' => 'Jump high'] + $payload)->assertOk();
         $as->deleteJson("/api/practical-activities/{$jump}")->assertOk();
+    }
+
+    public function test_active_quarter_allows_only_a_first_video(): void
+    {
+        [$tina, , $domain, , $q2] = $this->quarterTwoActive();
+        $disk = Storage::fake('public');
+        $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
+        $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];
+        $locked = ['quarter' => 'The 2nd Quarter is active'];
+        $as = $this->actingAs($tina);
+        $lessonVideo = fn () => $as->post("/api/lessons/{$q2}/video", ['video' => $video()], ['Accept' => 'application/json']);
+
+        // A learner already did one of the lesson's activities, so both have records; the lesson still gets its first video.
+        $skip = $this->practical($q2, 'Skip');
+        $this->oldYearRecord($skip, $tina);
+        $lessonVideo()->assertOk()->assertJsonPath('lessonId', $q2);
+        $path = DB::table('lessons')->where('id', $q2)->value('lesson_video_url');
+        $disk->assertExists($path);
+
+        // Once there, it stays: a second upload, removing it, and every other change are refused.
+        $lessonVideo()->assertStatus(422)->assertJsonValidationErrors(['video' => 'This lesson already has a video.']);
+        $as->deleteJson("/api/lessons/{$q2}/video")->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->patchJson("/api/lessons/{$q2}", ['title' => 'Renamed', 'description' => 'Changed'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $this->assertSame([$path, 'Lesson Q2', null], array_values((array) DB::table('lessons')->where('id', $q2)->first(['lesson_video_url', 'title', 'description'])));
+        $this->assertSame([$path], $disk->allFiles());
+
+        // A practical activity without a demo gets one, and nothing else about it changes.
+        $hop = $this->practical($q2, 'Hop');
+        $before = DB::table('activities')->where('id', $hop)->first(['name', 'description', 'instructions', 'is_active']);
+        $attach = fn (int $id) => $as->post("/api/practical-activities/{$id}/video", ['video' => $video()], ['Accept' => 'application/json']);
+        $attach($hop)->assertOk()->assertJson(['id' => $hop, 'activityName' => 'Hop', 'teacherGuidelines' => '-', 'demoVideoReady' => true]);
+        $demo = DB::table('practical_activity_details')->where('activity_id', $hop)->value('demo_video_url');
+        $disk->assertExists($demo);
+        $this->assertEquals($before, DB::table('activities')->where('id', $hop)->first(['name', 'description', 'instructions', 'is_active']));
+        $this->assertSame('-', DB::table('practical_activity_details')->where('activity_id', $hop)->value('teacher_guidelines'));
+
+        // Its demo can't be replaced either way, or the activity edited or removed.
+        $attach($hop)->assertStatus(422)->assertJsonValidationErrors(['video' => 'This practical activity already has a video.']);
+        $as->post("/api/practical-activities/{$hop}", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $as->deleteJson("/api/practical-activities/{$hop}")->assertStatus(422)->assertJsonValidationErrors($locked);
+        $this->assertSame($demo, DB::table('practical_activity_details')->where('activity_id', $hop)->value('demo_video_url'));
+        $this->assertEqualsCanonicalizing([$path, $demo], $disk->allFiles());
+
+        // So does the practical activity the learner already did.
+        $attach($skip)->assertOk();
+
+        // Only practical activities, and only real videos.
+        $digital = DB::table('activities')->insertGetId(['lesson_id' => $q2, 'activity_code' => 'DG-1', 'name' => 'Game', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 3]);
+        $attach($digital)->assertNotFound();
+        $attach(99999)->assertNotFound();
+        $jump = $this->practical($q2, 'Jump');
+        $as->post("/api/practical-activities/{$jump}/video", ['video' => UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf')], ['Accept' => 'application/json'])
+            ->assertJsonValidationErrors('video');
+        $this->assertNull(DB::table('practical_activity_details')->where('activity_id', $jump)->value('demo_video_url'));
+
+        // Not a way to add lessons or activities to the active quarter.
+        $as->post("/api/lessons/{$q2}/practical-activities", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($locked);
+        $this->assertSame(4, DB::table('activities')->where('lesson_id', $q2)->count());
+        $this->assertSame(1, DB::table('lessons')->where('module_domain_id', $domain)->where('quarter_number', 2)->count());
+    }
+
+    public function test_an_upcoming_quarter_keeps_the_record_rule_for_a_first_video(): void
+    {
+        [$tina, , , $q1] = $this->quarterTwoActive();
+        Storage::fake('public');
+        $attach = fn (int $id) => $this->actingAs($tina)->post("/api/practical-activities/{$id}/video", ['video' => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4')], ['Accept' => 'application/json']);
+
+        $hop = $this->practical($q1, 'Hop');
+        $attach($hop)->assertOk();
+        $skip = $this->practical($q1, 'Skip');
+        $this->oldYearRecord($skip, $tina);
+        $attach($skip)->assertStatus(422)->assertJsonValidationErrors('protected');
+        $this->assertNull(DB::table('practical_activity_details')->where('activity_id', $skip)->value('demo_video_url'));
+    }
+
+    public function test_video_attaches_take_the_quarter_lock(): void
+    {
+        [$tina, , , , $q2] = $this->quarterTwoActive();
+        Storage::fake('public');
+        $hop = $this->practical($q2, 'Hop');
+        $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
+
+        $this->assertTrue($this->quarterLockFree());
+        $this->actingAs($tina)->post("/api/practical-activities/{$hop}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertOk();
+        $this->assertFalse($this->quarterLockFree());
+        $this->actingAs($tina)->post("/api/lessons/{$q2}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertOk();
+        $this->assertFalse($this->quarterLockFree());
     }
 
     public function test_a_lesson_or_activity_cannot_be_moved_into_or_out_of_the_active_quarter(): void
@@ -545,8 +633,9 @@ class CurriculumTest extends TestCase
             $withVideo = $lesson($quarter, 'With video', "lesson-videos/q{$quarter}.mp4");
             $hop = $this->practical($plain, "Hop Q{$quarter}");
             DB::table('practical_activity_details')->where('activity_id', $hop)->update(['demo_video_url' => "practical-demos/q{$quarter}.mp4"]);
+            $bare = $this->practical($plain, "Bare Q{$quarter}");
             $files = $disk->allFiles();
-            $snapshot = fn () => [DB::table('lessons')->count(), DB::table('activities')->count(), $this->recordSnapshot([$plain, $withVideo], [$hop], [])];
+            $snapshot = fn () => [DB::table('lessons')->count(), DB::table('activities')->count(), $this->recordSnapshot([$plain, $withVideo], [$hop, $bare], [])];
             $before = $snapshot();
             $error = ['quarter' => $message];
 
@@ -554,6 +643,8 @@ class CurriculumTest extends TestCase
                 ->assertStatus(422)->assertJsonValidationErrors($error);
             $as->patchJson("/api/lessons/{$plain}", ['title' => 'Renamed', 'description' => 'Changed'])->assertStatus(422)->assertJsonValidationErrors($error);
             $as->post("/api/lessons/{$plain}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
+            // Unlike the active quarter, not even a first video.
+            $as->post("/api/practical-activities/{$bare}/video", ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
             $as->deleteJson("/api/lessons/{$withVideo}/video")->assertStatus(422)->assertJsonValidationErrors($error);
             $as->post("/api/lessons/{$plain}/practical-activities", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
             $as->post("/api/practical-activities/{$hop}", $payload + ['video' => $video()], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors($error);
@@ -566,7 +657,7 @@ class CurriculumTest extends TestCase
         // Still viewable, videos included, and the UI gets each configured quarter's status.
         $this->assertContains($q1, array_column(collect($as->getJson('/api/modules')->assertOk()->json())->firstWhere('id', $reading)['lessons'], 'id'));
         $week = collect($as->getJson("/api/modules/{$reading}/lessons?quarter=1&week=1")->assertOk()->json());
-        $this->assertSame(['Hop Q1'], array_column($week->firstWhere('lessonId', $q1)['activities'], 'activityName'));
+        $this->assertEqualsCanonicalizing(['Hop Q1', 'Bare Q1'], array_column($week->firstWhere('lessonId', $q1)['activities'], 'activityName'));
         $as->getJson('/api/school-years/active')->assertOk()
             ->assertJson(['quarterStatuses' => [1 => 'completed', 2 => 'active', 3 => 'upcoming']])->assertJsonMissingPath('quarterStatuses.4');
 

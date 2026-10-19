@@ -83,6 +83,7 @@ Route::middleware(['auth:sanctum', EnsureTeacherCanWork::class])->group(function
     // POST, not PUT: PHP only reads multipart uploads on POST, and an edit may carry a new video.
     Route::post('/practical-activities/{activity}', [CurriculumController::class, 'updatePracticalActivity'])->whereNumber('activity');
     Route::delete('/practical-activities/{activity}', [CurriculumController::class, 'destroyPracticalActivity'])->whereNumber('activity');
+    Route::post('/practical-activities/{activity}/video', [CurriculumController::class, 'storePracticalActivityVideo'])->whereNumber('activity');
 
     Route::get('/learners', [LearnerController::class, 'index']);
     Route::post('/learners', [LearnerController::class, 'store']);

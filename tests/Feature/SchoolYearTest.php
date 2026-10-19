@@ -262,7 +262,7 @@ class SchoolYearTest extends TestCase
 
         [$current] = $this->twoYears();
         $this->actingAs($tina)->getJson('/api/school-years/active')->assertOk()
-            ->assertExactJson(['schoolYearId' => $current->id, 'name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15', 'status' => 'active', 'sections' => [], 'activeQuarter' => null, 'activeQuarterNumber' => null, 'quarterStatuses' => []]);
+            ->assertExactJson(['schoolYearId' => $current->id, 'name' => '2026-2027', 'startDate' => '2026-06-15', 'endDate' => '2027-04-15', 'status' => 'active', 'sections' => [], 'activeQuarter' => null, 'activeQuarterNumber' => null, 'quarterStatuses' => [], 'canAddModules' => true]);
     }
 
     public function test_list_returns_stored_status_even_when_dates_disagree(): void

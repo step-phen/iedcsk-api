@@ -20,6 +20,18 @@ class WritingQuarterFourLessonsSeeder extends Seeder
         [3, 1, 7, 'Tracing Lowercase Letter q', 'Learners combine taught strokes to trace lowercase q with increasing control.'],
         [3, 3, 8, 'Tracing Lowercase Letter o', 'Learners combine taught strokes to trace lowercase o with increasing control.'],
         [3, 5, 9, 'Tracing Lowercase Letter s', 'Learners combine taught strokes to trace lowercase s with increasing control.'],
+        [4, 1, 10, 'Tracing Familiar Numerals', 'Learners use taught strokes to trace familiar numerals from 1 to 10.'],
+        [4, 3, 11, 'Tracing and Copying My Name', 'Learners follow a personalized name model and begin copying their name with a capital first letter.'],
+        [4, 5, 12, 'Reviewing Letters, Numerals, and Name Writing', 'Learners review taught lowercase letters, numerals 1-10, and tracing or copying their name.'],
+        [5, 1, 13, 'Tracing Lowercase Letter r', 'Learners combine taught strokes to trace lowercase r with increasing control.'],
+        [5, 3, 14, 'Tracing Lowercase Letter k', 'Learners combine taught strokes to trace lowercase k with increasing control.'],
+        [5, 5, 15, 'Tracing Lowercase Letter u', 'Learners combine taught strokes to trace lowercase u with increasing control.'],
+        [6, 1, 16, 'Tracing Lowercase Letter v', 'Learners combine taught strokes to trace lowercase v with increasing control.'],
+        [6, 3, 17, 'Tracing Lowercase Letter w', 'Learners combine taught strokes to trace lowercase w with increasing control.'],
+        [6, 5, 18, 'Tracing Lowercase Letter x', 'Learners combine taught strokes to trace lowercase x with increasing control.'],
+        [7, 1, 19, 'Tracing Lowercase Letters y and z', 'Learners combine taught slants and straight strokes to trace lowercase y and z.'],
+        [7, 3, 20, 'Reviewing Fourth-Quarter Writing Skills', 'Learners review capital and lowercase letters, familiar numerals, and name writing using taught models.'],
+        [7, 5, 21, 'Assessing Fourth-Quarter Writing Skills', 'Learners demonstrate taught letter and numeral formation and increasing independence in writing their name.'],
     ];
 
     public function run(): void
