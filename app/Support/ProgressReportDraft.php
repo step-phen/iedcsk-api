@@ -171,6 +171,8 @@ class ProgressReportDraft
     // Strengths in the first paragraph, still-learning and needs-practice in the second, as in the printed sample.
     public static function observed(string $name, ?string $gender, array $skills): string
     {
+        // Names are stored as typed ("divine"); a sentence starts with a capital, as the class list shows them.
+        $name = preg_replace_callback('/(^|\s)\S/u', fn ($m) => mb_strtoupper($m[0]), $name);
         $pronoun = ['Male' => 'He', 'Female' => 'She'][$gender ?? ''] ?? $name;
         $subject = $name;
         $paragraphs = [];
@@ -179,9 +181,25 @@ class ProgressReportDraft
             foreach ($levels as $level) {
                 foreach (['checklist', 'practical', 'digital'] as $source) {
                     $items = array_column(array_filter($skills, fn ($s) => $s['level'] === $level && $s['source'] === $source), 'item');
-                    foreach ($items ? self::predicates($level, $source, $items) : [] as $predicate) {
+                    // A letter skill still being learned takes in the same skill's needs-practice letters,
+                    // so "Xx and Yy" and "Vv and Ww" read as one sentence, then one line says they need practice.
+                    $alsoNeeds = false;
+                    if ($level === 'developing') {
+                        $templates = array_filter(array_map(self::letterTemplate(...), $items));
+                        foreach ($skills as $i => $s) {
+                            if ($s['level'] === 'needs' && $s['source'] === $source && in_array(self::letterTemplate($s['item']), $templates, true)) {
+                                $items[] = $s['item'];
+                                unset($skills[$i]);
+                                $alsoNeeds = true;
+                            }
+                        }
+                    }
+                    foreach ($items ? self::predicates($level, $source, self::mergeLetters($items)) : [] as $predicate) {
                         $sentences[] = "{$subject} {$predicate}.";
                         $subject = $pronoun;
+                    }
+                    if ($alsoNeeds) {
+                        $sentences[] = "{$subject} ".($source === 'practical' ? 'needs help' : 'needs more practice').' with these letters.';
                     }
                 }
             }
@@ -264,10 +282,51 @@ class ProgressReportDraft
         return $base === null ? null : $base.$m[2];
     }
 
+    // A run of letter pairs in a skill: "Xx and Yy", "Aa, Ee, Ii, Oo, Uu".
+    private static function letterList(): string
+    {
+        $pair = implode('|', array_map(fn ($c) => $c.strtolower($c), range('A', 'Z')));
+
+        return "/\b(?:{$pair})(?:(?:,? and |, )(?:{$pair}))*\b/";
+    }
+
+    // The skill with its letters taken out, so skills that differ only in their letters match; null without letters.
+    private static function letterTemplate(string $item): ?string
+    {
+        $item = rtrim(trim($item), '.');
+
+        return preg_match(self::letterList(), $item) ? preg_replace(self::letterList(), '{letters}', $item, 1) : null;
+    }
+
+    // "... Xx and Yy after ..." + "... Vv and Ww after ..." -> "... Xx, Yy, Vv, and Ww after ..."; other items as they are.
+    private static function mergeLetters(array $items): array
+    {
+        $groups = [];
+        foreach ($items as $item) {
+            $item = rtrim(trim($item), '.');
+            $template = self::letterTemplate($item);
+            if ($template === null) {
+                $groups[$item] = null;
+
+                continue;
+            }
+            preg_match(self::letterList(), $item, $m);
+            $groups[$template] = [...$groups[$template] ?? [], ...preg_split('/,? and |, /', $m[0])];
+        }
+
+        $out = [];
+        foreach ($groups as $text => $letters) {
+            $out[] = $letters === null ? $text : str_replace('{letters}', self::join(array_values(array_unique($letters))), $text);
+        }
+
+        return $out;
+    }
+
     private static function join(array $parts): string
     {
         $last = array_pop($parts);
 
-        return $parts ? implode(', ', $parts).' and '.$last : $last;
+        // Serial comma for three or more: "Xx, Yy, Vv, and Ww".
+        return $parts ? implode(', ', $parts).(count($parts) > 1 ? ',' : '').' and '.$last : $last;
     }
 }
