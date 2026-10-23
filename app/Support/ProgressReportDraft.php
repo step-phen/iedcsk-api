@@ -180,21 +180,24 @@ class ProgressReportDraft
             $sentences = [];
             foreach ($levels as $level) {
                 foreach (['checklist', 'practical', 'digital'] as $source) {
-                    $items = array_column(array_filter($skills, fn ($s) => $s['level'] === $level && $s['source'] === $source), 'item');
+                    $picked = array_filter($skills, fn ($s) => $s['level'] === $level && $s['source'] === $source);
                     // A letter skill still being learned takes in the same skill's needs-practice letters,
                     // so "Xx and Yy" and "Vv and Ww" read as one sentence, then one line says they need practice.
                     $alsoNeeds = false;
                     if ($level === 'developing') {
-                        $templates = array_filter(array_map(self::letterTemplate(...), $items));
+                        $templates = array_filter(array_map(self::letterTemplate(...), array_column($picked, 'item')));
                         foreach ($skills as $i => $s) {
                             if ($s['level'] === 'needs' && $s['source'] === $source && in_array(self::letterTemplate($s['item']), $templates, true)) {
-                                $items[] = $s['item'];
+                                $picked[] = $s;
                                 unset($skills[$i]);
                                 $alsoNeeds = true;
                             }
                         }
                     }
-                    foreach ($items ? self::predicates($level, $source, self::mergeLetters($items)) : [] as $predicate) {
+                    $items = array_column($picked, 'item');
+                    // Merged letter skills are still separate games, so "activities" counts the games, not the sentences.
+                    $games = array_unique(array_filter(array_column($picked, 'activityId')));
+                    foreach ($items ? self::predicates($level, $source, self::mergeLetters($items), $games ? count($games) : count($items)) : [] as $predicate) {
                         $sentences[] = "{$subject} {$predicate}.";
                         $subject = $pronoun;
                     }
@@ -211,14 +214,15 @@ class ProgressReportDraft
         return $paragraphs ? implode("\n\n", $paragraphs) : self::NOT_ASSESSED;
     }
 
-    private static function predicates(string $level, string $source, array $items): array
+    private static function predicates(string $level, string $source, array $items, int $activities): array
     {
         $plural = count($items) > 1 ? 's' : '';
+        $activity = $activities > 1 ? 'activities' : 'activity';
         // Says where the evidence came from, never more than that.
         $where = match ($source) {
             'checklist' => ', as observed by the teacher',
-            'practical' => ' during the hands-on activit'.($plural ? 'ies' : 'y'),
-            'digital' => ' in the completed digital activit'.($plural ? 'ies' : 'y'),
+            'practical' => " during the hands-on {$activity}",
+            'digital' => " in the completed digital {$activity}",
         };
         [$verbs, $quoted] = self::split($items, fn ($item, $base) => $level === 'strength' ? lcfirst($item) : $base);
 

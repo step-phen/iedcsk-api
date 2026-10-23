@@ -73,11 +73,20 @@ class ProgressReportDraftTest extends TestCase
     public function test_letter_skills_that_differ_only_in_letters_read_as_one_sentence(): void
     {
         $this->assertSame(
-            'Divine is still learning to recognize uppercase and lowercase Xx, Yy, Vv, and Ww after hearing the letter names in the completed digital activity. '
+            'Divine is still learning to recognize uppercase and lowercase Xx, Yy, Vv, and Ww after hearing the letter names in the completed digital activities. '
             .'She needs more practice with these letters.',
             ProgressReportDraft::observed('divine', 'Female', [
-                $this->skill('Recognizes uppercase and lowercase Xx and Yy after hearing the letter names', 'developing', 'digital'),
-                $this->skill('Recognizes uppercase and lowercase Vv and Ww after hearing the letter names', 'needs', 'digital'),
+                $this->skill('Recognizes uppercase and lowercase Xx and Yy after hearing the letter names', 'developing', 'digital') + ['activityId' => 7],
+                $this->skill('Recognizes uppercase and lowercase Vv and Ww after hearing the letter names', 'needs', 'digital') + ['activityId' => 8],
+            ]),
+        );
+
+        // Two skills practised in one game still say "activity".
+        $this->assertSame(
+            'Ana recognizes uppercase and lowercase Bb and Cc in the completed digital activity.',
+            ProgressReportDraft::observed('Ana', null, [
+                $this->skill('Recognizes uppercase and lowercase Bb', 'strength', 'digital') + ['activityId' => 7],
+                $this->skill('Recognizes uppercase and lowercase Cc', 'strength', 'digital') + ['activityId' => 7],
             ]),
         );
 
