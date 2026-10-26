@@ -135,7 +135,10 @@ class ClassroomSessionTest extends TestCase
         $this->start($game)->assertOk()->assertJsonStructure(['classroomSessionId', 'startedAt']);
         // The waiting device sees the class start without picking again.
         $this->app['auth']->forgetGuards();
-        $this->getJson("/api/classroom-session?learnerId={$this->kids['Ana']}")->assertJson(['active' => true, 'activityId' => $game]);
+        $this->getJson("/api/classroom-session?learnerId={$this->kids['Ana']}")->assertJson(['active' => true, 'activityId' => $game, 'lessonVideoUrl' => null]);
+        // The video plays only on the day it was added to (MAPEH: Tuesday); a later day of the same lesson goes straight to its activity.
+        DB::table('lessons')->insert(['module_domain_id' => DB::table('lessons')->where('id', $this->lesson)->value('module_domain_id'), 'title' => 'Letter B', 'quarter_number' => 1, 'week_number' => 1, 'day_of_week' => 3, 'sequence_order' => 1, 'lesson_video_url' => 'lesson-videos/b.mp4']);
+        $this->assertNull($this->getJson('/api/classroom-session')->json('lessonVideoUrl'));
         $this->assertSame(['absent', 'absent', 'present'], DB::table('classroom_session_learners')->orderBy('attendance_status')->pluck('attendance_status')->all());
 
         $board = $this->actingAs($this->tina)->getJson("/api/sections/{$this->joy}/classroom")->assertOk()->json();
@@ -144,6 +147,7 @@ class ClassroomSessionTest extends TestCase
         $this->assertNotNull($board['activeSession']['activeLessonTitle']);
         $this->assertSame('PRESENT', $board['attendance'][$this->kids['Ana']]);
         $this->assertSame(['RD-Q1W1-01', 'RD-Q1W1-02'], array_column($board['modules'][0]['lessons'][0]['activities'], 'activityName'));
+        $this->assertSame('Reading and Language Development', $board['modules'][0]['lessons'][0]['domainName']);
 
         // Only present/late learners are pickable or may claim a device.
         $this->device()->getJson('/api/classroom-session/learners')->assertExactJson(['learners' => [['id' => $this->kids['Ana'], 'firstName' => 'Ana', 'photoUrl' => '/storage/learners/ana.webp']]]);
@@ -273,8 +277,9 @@ class ClassroomSessionTest extends TestCase
             ->assertJson(['activityFormat' => 'practical', 'activityType' => 'demonstration', 'activityVideoUrl' => asset('storage/practical-demos/hop.mp4'), 'activityLocked' => false]);
         $this->postJson('/api/classroom-session/finish', ['activityId' => $hop, 'answers' => [['questionId' => 'a', 'response' => 'b']]])->assertStatus(400);
 
-        $rate = fn (string $result) => $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/classroom/practical-rating", ['learnerId' => $this->kids['Ana'], 'activityId' => $hop, 'result' => $result, 'remarks' => ' Hopped well ']);
+        $rate = fn (int|string $result) => $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/classroom/practical-rating", ['learnerId' => $this->kids['Ana'], 'activityId' => $hop, 'result' => $result, 'remarks' => ' Hopped well ']);
         $rate('good')->assertStatus(422)->assertJsonValidationErrors('result');
+        $rate(6)->assertStatus(422)->assertJsonValidationErrors('result');
 
         $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
         $this->postJson('/api/classroom-session/demonstration', ['activityId' => $hop])->assertOk();
@@ -286,16 +291,16 @@ class ClassroomSessionTest extends TestCase
         $this->getJson('/api/notifications')->assertJsonPath('unread', 1)->assertJsonPath('items.0.kind', 'needs_rating');
 
         $rate('bad')->assertStatus(422)->assertJsonValidationErrors('result');
-        $rate('good')->assertOk();
-        $this->assertSame(['good', 'Hopped well'], [$card()['activePracticalActivity']['ratingStatus'], $card()['activePracticalActivity']['remarks']]);
-        $this->assertSame('good', $card()['completedActivities'][0]['practicalResult']);
+        $rate(3)->assertOk();
+        $this->assertSame([3, 'Hopped well'], [$card()['activePracticalActivity']['ratingStatus'], $card()['activePracticalActivity']['remarks']]);
+        $this->assertSame(3, $card()['completedActivities'][0]['practicalResult']);
         $record = $this->actingAs($this->tina)->getJson("/api/sections/{$this->joy}/classroom-record?moduleId={$this->reading()}&quarter=1")->json('rows');
-        $this->assertSame(['rating' => 'good'], collect($record)->firstWhere('firstName', 'Ana')['cells'][$hop]);
-        // The rated practical joins the Total on a 3-point scale: Good is 2 of 3.
-        $this->assertEquals(['score' => 2, 'maxScore' => 3], collect($record)->firstWhere('firstName', 'Ana')['total']);
+        $this->assertSame(['rating' => 3], collect($record)->firstWhere('firstName', 'Ana')['cells'][$hop]);
+        // The rated practical joins the Total out of 5: a 3 is 3 of 5.
+        $this->assertEquals(['score' => 3, 'maxScore' => 5], collect($record)->firstWhere('firstName', 'Ana')['total']);
 
         $this->device()->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
-        $this->getJson("/api/classroom-session/practical-result?activityId={$hop}")->assertExactJson(['rated' => true, 'result' => 'good']);
+        $this->getJson("/api/classroom-session/practical-result?activityId={$hop}")->assertExactJson(['rated' => true, 'result' => 3]);
     }
 
     public function test_a_practical_activity_without_a_video_is_locked_for_learners(): void
@@ -392,7 +397,7 @@ class ClassroomSessionTest extends TestCase
         $this->start($hop)->assertOk();
         $this->device()->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
         $this->postJson('/api/classroom-session/demonstration', ['activityId' => $hop])->assertOk();
-        $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/classroom/practical-rating", ['learnerId' => $this->kids['Ana'], 'activityId' => $hop, 'result' => 'needs_help'])->assertOk();
+        $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/classroom/practical-rating", ['learnerId' => $this->kids['Ana'], 'activityId' => $hop, 'result' => 2])->assertOk();
         $this->assertSame(['status' => 'in_progress', 'completed' => 1, 'total' => 1], $badge());
         $this->actingAs($this->tina)->postJson("/api/sections/{$this->joy}/classroom/end")->assertOk();
         $this->assertSame(['status' => 'done', 'completed' => 1, 'total' => 1], $badge());

@@ -138,21 +138,21 @@ class StrengthsReportTest extends TestCase
         [$unfinished] = $this->activity('math', 'math_readiness');
 
         $this->played($high, [['score' => 4, 'max_score' => 5]]);
-        $this->played($practical, [['practical_rating' => 'good', 'evaluated_by' => $this->tina->id]]);
+        $this->played($practical, [['practical_rating' => 3, 'evaluated_by' => $this->tina->id]]);
         // A valid zero is a result and counts.
         $this->played($zero, [['score' => 0, 'max_score' => 5]]);
         $this->played($unrated, [['status' => 'submitted', 'evaluated_at' => null, 'submitted_at' => now()]]);
         $this->played($unfinished, [['status' => 'in_progress', 'evaluated_at' => null]]);
 
-        // 4 + 2 + 0 out of 5 + 3 + 5; the unplayed, unrated and unfinished ones stay out of the percent but in the coverage.
+        // 4 + 3 + 0 out of 5 + 5 + 5; the unplayed, unrated and unfinished ones stay out of the percent but in the coverage.
         $this->assertEquals(
-            ['moduleDomainId' => $math->id, 'total' => 6, 'assessed' => 3, 'earned' => 6, 'possible' => 13, 'percent' => 46],
+            ['moduleDomainId' => $math->id, 'total' => 6, 'assessed' => 3, 'earned' => 7, 'possible' => 15, 'percent' => 47],
             $this->module($this->report(), $math->id),
         );
 
         // The same numbers as the Classroom Record's total for that module and quarter.
         $record = $this->actingAs($this->tina)->getJson("/api/sections/{$this->sections['Joy']}/classroom-record?moduleId={$this->moduleId('math')}&quarter=1")->assertOk()->json();
-        $this->assertEquals(['score' => 6, 'maxScore' => 13], collect($record['rows'])->firstWhere('learnerId', $this->gabrielId)['total']);
+        $this->assertEquals(['score' => 7, 'maxScore' => 15], collect($record['rows'])->firstWhere('learnerId', $this->gabrielId)['total']);
     }
 
     public function test_nothing_assessed_is_null_not_zero_percent(): void
@@ -187,14 +187,14 @@ class StrengthsReportTest extends TestCase
         $this->assertEquals(5, $this->skillEntry($report, $item)['result']['score']);
     }
 
-    public function test_rated_practicals_count_on_the_three_point_scale(): void
+    public function test_rated_practicals_count_out_of_five(): void
     {
         [$veryGood, $arts] = $this->activity('mapeh', 'arts_crafts', 'practical');
         [$needsHelp] = $this->activity('mapeh', 'arts_crafts', 'practical');
-        $this->played($veryGood, [['practical_rating' => 'very_good', 'evaluated_by' => $this->tina->id]]);
-        $this->played($needsHelp, [['practical_rating' => 'needs_help', 'evaluated_by' => $this->tina->id]]);
+        $this->played($veryGood, [['practical_rating' => 5, 'evaluated_by' => $this->tina->id]]);
+        $this->played($needsHelp, [['practical_rating' => 2, 'evaluated_by' => $this->tina->id]]);
 
-        $this->assertEquals([2, 4, 6, 67], array_values(array_intersect_key($this->module($this->report(), $arts->id), array_flip(['assessed', 'earned', 'possible', 'percent']))));
+        $this->assertEquals([2, 7, 10, 70], array_values(array_intersect_key($this->module($this->report(), $arts->id), array_flip(['assessed', 'earned', 'possible', 'percent']))));
     }
 
     public function test_the_teachers_checklist_rating_is_the_only_skill_status(): void

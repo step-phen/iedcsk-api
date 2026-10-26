@@ -1,6 +1,5 @@
-# Let CodeRabbit submit "Request changes" / "Approve" reviews instead of plain comments.
+# No automatic reviews; comment "@coderabbitai review" on a PR to ask for one.
 reviews:
-  request_changes_workflow: true
+  request_changes_workflow: false
   auto_review:
-    enabled: true
-    auto_incremental_review: true
+    enabled: false

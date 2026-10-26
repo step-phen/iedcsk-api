@@ -101,7 +101,7 @@ class ProgressReportTest extends TestCase
         DB::table('learner_developmental_checklists')->insert(['enrollment_id' => $this->gabriel, 'checklist_item_id' => $countItem, 'quarter_id' => $this->quarters[1], 'teacher_id' => $this->tina->id, 'rating' => 'developing', 'assessed_at' => now()]);
         $this->played($sort, ['status' => 'submitted', 'evaluated_at' => null, 'submitted_at' => now()]);
         $this->played($q2game, ['score' => 0, 'max_score' => 5], 2);
-        $this->played($draw, ['practical_rating' => 'very_good', 'evaluated_by' => $this->tina->id, 'remarks' => 'Neat work.']);
+        $this->played($draw, ['practical_rating' => 5, 'evaluated_by' => $this->tina->id, 'remarks' => 'Neat work.']);
 
         $report = $this->generate()->assertCreated()->json();
         $this->assertSame('draft', $report['status']);
@@ -194,7 +194,7 @@ class ProgressReportTest extends TestCase
 
         // New evidence: the untouched row picks it up, the edited row keeps the teacher's words.
         $this->played($shapes, ['score' => 5, 'max_score' => 5]);
-        $this->played($hop, ['practical_rating' => 'good', 'evaluated_by' => $this->tina->id]);
+        $this->played($hop, ['practical_rating' => 3, 'evaluated_by' => $this->tina->id]);
         $report = $this->actingAs($this->tina)->postJson("/api/progress-reports/{$id}/regenerate")->assertOk()->json();
         $math = $this->row($report, 'MATH READINESS');
         $this->assertSame('Gabriel enjoys shapes.', $math['developmentObserved']);

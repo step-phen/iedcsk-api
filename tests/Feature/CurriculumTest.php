@@ -739,7 +739,7 @@ class CurriculumTest extends TestCase
             'assigned_at' => '2025-07-01 08:00', 'status' => 'completed', 'completed_at' => '2025-07-01 09:00',
         ]);
         DB::table('learner_activity_attempts')->insert([
-            'assignment_id' => $assignment, 'attempt_number' => 1, 'status' => 'evaluated', 'practical_rating' => 'good',
+            'assignment_id' => $assignment, 'attempt_number' => 1, 'status' => 'evaluated', 'practical_rating' => 3,
             'evaluated_by' => $teacher->id, 'started_at' => '2025-07-01 08:00', 'evaluated_at' => '2025-07-01 09:00',
         ]);
 

@@ -331,7 +331,7 @@ class LearnerSessionController extends Controller
             ->orderByDesc('learner_activity_attempts.evaluated_at')
             ->value('learner_activity_attempts.practical_rating') : null;
 
-        return response()->json($rating ? ['rated' => true, 'result' => $rating] : ['rated' => false]);
+        return response()->json($rating ? ['rated' => true, 'result' => (int) $rating] : ['rated' => false]);
     }
 
     // A game's questions: for a signed-in teacher, or a learner whose class has this activity on screen.

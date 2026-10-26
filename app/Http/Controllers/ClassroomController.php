@@ -344,11 +344,12 @@ class ClassroomController extends Controller
 
         $lessons = DB::table('lessons')
             ->join('module_domains', 'module_domains.id', '=', 'lessons.module_domain_id')
+            ->join('developmental_domains', 'developmental_domains.id', '=', 'module_domains.domain_id')
             ->whereIn('module_domains.module_id', $modules->pluck('id'))
             ->where('lessons.is_active', true)
             ->where('lessons.quarter_number', $activeQuarter ?? -1)
             ->orderBy('lessons.quarter_number')->orderBy('lessons.week_number')->orderBy('lessons.day_of_week')->orderBy('lessons.sequence_order')
-            ->get(['lessons.id', 'module_domains.module_id', 'lessons.title', 'lessons.quarter_number', 'lessons.week_number', 'lessons.day_of_week'])
+            ->get(['lessons.id', 'module_domains.module_id', 'developmental_domains.name as domain_name', 'lessons.title', 'lessons.quarter_number', 'lessons.week_number', 'lessons.day_of_week'])
             ->groupBy('module_id');
 
         $activities = DB::table('activities')
@@ -371,6 +372,8 @@ class ClassroomController extends Controller
             'lessons' => ($lessons[$m->id] ?? collect())->map(fn ($l) => [
                 'id' => $l->id,
                 'lessonName' => $l->title,
+                // MAPEH spans three domains; the modal lets the teacher pick one before the lesson.
+                'domainName' => $l->domain_name,
                 'week' => $l->week_number ?? 0,
                 'activities' => ($activities[$l->id] ?? collect())->map(fn ($a) => [
                     'id' => $a->id,
@@ -454,7 +457,7 @@ class ClassroomController extends Controller
                         'week' => $done->week_number,
                         'score' => $attempt?->score !== null ? (float) $attempt->score : null,
                         'activityScore' => $attempt?->max_score !== null ? (float) $attempt->max_score : null,
-                        'practicalResult' => $attempt?->practical_rating,
+                        'practicalResult' => $attempt?->practical_rating !== null ? (int) $attempt->practical_rating : null,
                     ], fn ($v) => $v !== null);
                 })->values(),
                 'missingActivities' => ($missed[$enrollmentId] ?? collect())
@@ -465,7 +468,7 @@ class ClassroomController extends Controller
                 'activePracticalActivity' => $isPractical ? [
                     'activityId' => $active->activity_id,
                     'activityName' => $active->activity_name,
-                    'ratingStatus' => $currentAttempt?->practical_rating ?? 'NOT_RATED',
+                    'ratingStatus' => $currentAttempt?->practical_rating !== null ? (int) $currentAttempt->practical_rating : 'NOT_RATED',
                     'remarks' => $currentAttempt?->remarks,
                 ] : null,
             ];
