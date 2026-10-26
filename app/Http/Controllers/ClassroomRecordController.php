@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\DB;
 // Class Scores: every activity of one module and quarter as columns, each learner's latest result in the cells.
 class ClassroomRecordController extends Controller
 {
-    public const PRACTICAL_POINTS = ['needs_help' => 1, 'good' => 2, 'very_good' => 3];
+    // A practical activity is rated 1 to 5.
+    public const PRACTICAL_MAX = 5;
 
     public function show(ClassroomRecordRequest $request, #[CurrentUser] Teacher $teacher, int $section): JsonResponse
     {
@@ -201,12 +202,12 @@ class ClassroomRecordController extends Controller
         ]);
     }
 
-    // Classroom Record points: a digital score as it is (a zero too), a rated practical on a 3-point scale, an unrated one not yet.
+    // Classroom Record points: a digital score as it is (a zero too), a rated practical out of 5, an unrated one not yet.
     public static function points(object $result): ?array
     {
         return $result->max_score !== null
             ? [(float) $result->score, (float) $result->max_score]
-            : ($result->practical_rating ? [(float) self::PRACTICAL_POINTS[$result->practical_rating], 3.0] : null);
+            : ($result->practical_rating ? [(float) $result->practical_rating, (float) self::PRACTICAL_MAX] : null);
     }
 
     // Newest finished attempt first, so the first one kept per learner and activity is the latest result.
@@ -234,6 +235,6 @@ class ClassroomRecordController extends Controller
     {
         return $result->max_score !== null
             ? ['score' => (float) $result->score, 'maxScore' => (float) $result->max_score]
-            : ['rating' => $result->practical_rating];
+            : ['rating' => $result->practical_rating !== null ? (int) $result->practical_rating : null];
     }
 }

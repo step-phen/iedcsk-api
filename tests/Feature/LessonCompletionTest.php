@@ -62,7 +62,7 @@ class LessonCompletionTest extends TestCase
         return DB::table('activities')->insertGetId(['lesson_id' => $lesson, 'activity_code' => 'A-'.++$n, 'name' => "Activity {$n}", 'instructions' => '-', 'activity_format' => $format, 'sequence_order' => 1, 'is_active' => $active]);
     }
 
-    /** One assignment with the given attempts, e.g. ['evaluated', 'score' => 0] or ['submitted'] or ['evaluated', 'rating' => 'good']. */
+    /** One assignment with the given attempts, e.g. ['evaluated', 'score' => 0] or ['submitted'] or ['evaluated', 'rating' => 3]. */
     private function work(int $enrollment, int $activity, array ...$attempts): void
     {
         $quarter = DB::table('quarters')->where('school_year_id', DB::table('learner_school_years')->where('id', $enrollment)->value('school_year_id'))->value('id');
@@ -142,13 +142,13 @@ class LessonCompletionTest extends TestCase
         $this->assertSame(['status' => 'in_progress', 'completed' => 0, 'total' => 2], $this->badge($lesson));
 
         // Rated: Ana completed it, Ben hasn't.
-        DB::table('learner_activity_attempts')->where('status', 'submitted')->update(['status' => 'evaluated', 'practical_rating' => 'needs_help', 'evaluated_by' => $this->tina->id]);
+        DB::table('learner_activity_attempts')->where('status', 'submitted')->update(['status' => 'evaluated', 'practical_rating' => 2, 'evaluated_by' => $this->tina->id]);
         $this->assertSame(['status' => 'in_progress', 'completed' => 1, 'total' => 2], $this->badge($lesson));
 
         // Ben retried the game three times; repeated attempts count him once.
         $this->work($ben, $game, ['abandoned'], ['evaluated', 'score' => 1], ['evaluated', 'score' => 2]);
         $this->assertSame(['status' => 'in_progress', 'completed' => 1, 'total' => 2], $this->badge($lesson));
-        $this->work($ben, $hop, ['evaluated', 'rating' => 'very_good']);
+        $this->work($ben, $hop, ['evaluated', 'rating' => 5]);
         // Every learner finishing isn't Done; the teacher finishing the class is.
         $this->assertSame(['status' => 'in_progress', 'completed' => 2, 'total' => 2], $this->badge($lesson));
         $this->conduct([$game, $hop]);
@@ -170,7 +170,7 @@ class LessonCompletionTest extends TestCase
         // Ben was absent; the teacher taught both activities and Ana finished them.
         $this->conduct([$game, $hop]);
         $this->work($ana, $game, ['evaluated']);
-        $this->work($ana, $hop, ['evaluated', 'rating' => 'good']);
+        $this->work($ana, $hop, ['evaluated', 'rating' => 3]);
         $this->assertSame(['status' => 'done', 'completed' => 1, 'total' => 2], $this->badge($lesson));
     }
 
@@ -261,7 +261,7 @@ class LessonCompletionTest extends TestCase
         // Another week with the same title is its own card.
         $this->assertSame(['status' => null, 'completed' => 0, 'total' => 1], $board[$nextWeek]);
 
-        $this->work($ana, $wed, ['evaluated', 'rating' => 'good']);
+        $this->work($ana, $wed, ['evaluated', 'rating' => 3]);
         $this->conduct([$wed]);
         $board = $this->board();
         $this->assertSame(['status' => 'done', 'completed' => 1, 'total' => 1], $board[$monday]);

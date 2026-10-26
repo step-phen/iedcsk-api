@@ -140,8 +140,9 @@ class SchemaRulesTest extends TestCase
 
         $attempt = fn (array $row) => DB::table('learner_activity_attempts')->insert([...['assignment_id' => $assignment, 'attempt_number' => 1, 'started_at' => now()], ...$row]);
         $this->assertRejected(fn () => $attempt(['status' => 'evaluated', 'score' => 11, 'max_score' => 10]));
-        $this->assertRejected(fn () => $attempt(['status' => 'evaluated', 'score' => 5, 'max_score' => 10, 'practical_rating' => 'good']));
-        $this->assertRejected(fn () => $attempt(['status' => 'evaluated', 'practical_rating' => 'good']));
+        $this->assertRejected(fn () => $attempt(['status' => 'evaluated', 'score' => 5, 'max_score' => 10, 'practical_rating' => 3]));
+        $this->assertRejected(fn () => $attempt(['status' => 'evaluated', 'practical_rating' => 3]));
+        $this->assertRejected(fn () => $attempt(['status' => 'evaluated', 'practical_rating' => 6, 'evaluated_by' => $teacher]));
         $attempt(['status' => 'evaluated', 'score' => 8, 'max_score' => 10]);
 
         $this->assertRejected(fn () => DB::table('learner_activity_assignments')->where('id', $assignment)->update(['status' => 'completed']));

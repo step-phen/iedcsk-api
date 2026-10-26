@@ -26,8 +26,6 @@ class ProgressReportDraft
 
     private const CHECKLIST_LEVELS = ['achieved' => 'strength', 'developing' => 'developing', 'needs_support' => 'needs'];
 
-    private const PRACTICAL_LEVELS = ['very_good' => 'strength', 'good' => 'developing', 'needs_help' => 'needs'];
-
     // The report rows a section's active modules give, in print order.
     public static function rows(int $sectionId): Collection
     {
@@ -131,7 +129,8 @@ class ProgressReportDraft
     {
         [$level, $source] = match (true) {
             isset(self::CHECKLIST_LEVELS[$rating->rating ?? '']) => [self::CHECKLIST_LEVELS[$rating->rating], 'checklist'],
-            isset(self::PRACTICAL_LEVELS[$result->practical_rating ?? '']) => [self::PRACTICAL_LEVELS[$result->practical_rating], 'practical'],
+            // A 1-5 practical rating on the digital cut-offs: 4-5 strength, 3 developing, 1-2 needs.
+            ($result->practical_rating ?? null) !== null => [self::scoreLevel((float) $result->practical_rating, ClassroomRecordController::PRACTICAL_MAX), 'practical'],
             ($result->max_score ?? null) !== null => [self::scoreLevel((float) $result->score, (float) $result->max_score), 'digital'],
             default => [null, null],
         };
@@ -151,7 +150,7 @@ class ProgressReportDraft
                 'attemptId' => $result->attempt_id,
                 'score' => $result->score !== null ? (float) $result->score : null,
                 'maxScore' => $result->max_score !== null ? (float) $result->max_score : null,
-                'rating' => $result->practical_rating,
+                'rating' => $result->practical_rating !== null ? (int) $result->practical_rating : null,
                 'remarks' => $result->remarks,
                 'playedQuarter' => (int) $result->played_quarter,
                 'at' => $result->finished_at,
@@ -231,7 +230,7 @@ class ProgressReportDraft
             $out[] = match ($level) {
                 'strength' => self::join($verbs),
                 'developing' => 'is still learning to '.self::join($verbs),
-                // A needs_help rating records that the learner needed help, so it may say so.
+                // A low practical rating (1-2) records that the learner needed help, so it may say so.
                 'needs' => ($source === 'practical' ? 'needs help to ' : 'needs more practice to ').self::join($verbs),
             }.$where;
         }
