@@ -62,7 +62,7 @@ class SectionTest extends TestCase
         $this->actingAs($tina)->patchJson("/api/school-years/{$joyOnly->id}/activate", ['sections' => ['joy']])
             ->assertOk()->assertJson(['status' => 'active', 'sections' => ['Joy']]);
         $sections = $this->actingAs($tina)->getJson('/api/sections')->assertOk()
-            ->assertExactJson([['sectionId' => DB::table('sections')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning', 'canRename' => true, 'renameReason' => null]])
+            ->assertExactJson([['sectionId' => DB::table('sections')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning', 'canRename' => true, 'renameReason' => null, 'learnerCount' => 0, 'capacity' => Section::CAPACITY]])
             ->json();
         // All five modules, each with its morning timetable: Reading, Language, Writing on M/W/F plus MAPEH, Math on T/Th.
         $this->assertSame(5, DB::table('section_modules')->count());
@@ -186,7 +186,7 @@ class SectionTest extends TestCase
         $links = DB::table('section_modules')->where('section_id', $joy)->orderBy('id')->pluck('id')->all();
 
         $this->actingAs($tina)->patchJson("/api/sections/{$joy}", ['sectionName' => '  Sampaguita   Class '])->assertOk()
-            ->assertExactJson(['sectionId' => $joy, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Sampaguita Class', 'session' => 'morning', 'canRename' => true, 'renameReason' => null]);
+            ->assertExactJson(['sectionId' => $joy, 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Sampaguita Class', 'session' => 'morning', 'canRename' => true, 'renameReason' => null, 'learnerCount' => 0, 'capacity' => Section::CAPACITY]);
 
         // Same row, still Joy (morning), listed first, owned by Tina, with the same module links and timetable.
         $this->assertSame(['Joy', $tina->id], [Section::find($joy)->choice, Section::find($joy)->teacher_id]);

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Quarter;
 use App\Models\SchoolYear;
+use App\Models\Section;
 use App\Models\Teacher;
 use Database\Seeders\CurriculumSeeder;
 use Illuminate\Database\QueryException;
@@ -341,8 +342,8 @@ class SchoolYearTest extends TestCase
 
         // Activation set up Joy (morning) and Faith (afternoon), with no learners, so both can still be renamed.
         $this->actingAs($tina)->getJson('/api/sections')->assertOk()->assertExactJson([
-            ['sectionId' => DB::table('sections')->where('name', 'Joy')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning', 'canRename' => true, 'renameReason' => null],
-            ['sectionId' => DB::table('sections')->where('name', 'Faith')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith', 'session' => 'afternoon', 'canRename' => true, 'renameReason' => null],
+            ['sectionId' => DB::table('sections')->where('name', 'Joy')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Joy', 'session' => 'morning', 'canRename' => true, 'renameReason' => null, 'learnerCount' => 0, 'capacity' => Section::CAPACITY],
+            ['sectionId' => DB::table('sections')->where('name', 'Faith')->value('id'), 'gradeLevel' => 'Kindergarten', 'sectionName' => 'Faith', 'session' => 'afternoon', 'canRename' => true, 'renameReason' => null, 'learnerCount' => 0, 'capacity' => Section::CAPACITY],
         ]);
         $this->assertSame(0, DB::table('learners')->count());
         $this->assertSame(0, DB::table('learner_school_years')->count());
