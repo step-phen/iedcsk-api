@@ -22,6 +22,9 @@ class Section extends Model
 
     public const SET_UP_MESSAGE = "This school year's sections are already set up and can't be changed.";
 
+    // Active learners a section is meant to hold; the Add Learner form fills Joy to this, then Faith.
+    public const CAPACITY = 15;
+
     // Default Kindergarten timetables per session: module code => [start, end, ISO weekdays].
     private const TIMETABLES = [
         'morning' => [
@@ -130,8 +133,20 @@ class Section extends Model
             ->map(fn ($id) => (int) $id)->unique()->values()->all();
     }
 
-    // Shape the frontend's Section type expects; $hasRecords comes from withRecords().
-    public function toApiArray(bool $hasRecords): array
+    /**
+     * Active enrollments per section among $ids; a section with none is left out.
+     *
+     * @return array<int, int>
+     */
+    public static function learnerCounts(array $ids): array
+    {
+        return DB::table('learner_school_years')->whereIn('section_id', $ids)->where('status', 'active')
+            ->groupBy('section_id')->selectRaw('section_id, count(*) as total')->pluck('total', 'section_id')
+            ->map(fn ($n) => (int) $n)->all();
+    }
+
+    // Shape the frontend's Section type expects; $hasRecords comes from withRecords(), $learnerCount from learnerCounts().
+    public function toApiArray(bool $hasRecords, int $learnerCount = 0): array
     {
         return [
             'sectionId' => $this->id,
@@ -140,6 +155,8 @@ class Section extends Model
             'session' => $this->classSession(),
             'canRename' => ! $hasRecords,
             'renameReason' => $hasRecords ? self::NAME_LOCKED_MESSAGE : null,
+            'learnerCount' => $learnerCount,
+            'capacity' => self::CAPACITY,
         ];
     }
 }

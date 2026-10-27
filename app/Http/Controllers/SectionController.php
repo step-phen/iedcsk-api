@@ -27,8 +27,9 @@ class SectionController extends Controller
             ->sortBy(fn (Section $s) => $order[$s->choice ?? ''] ?? count($order))
             ->values();
         $recorded = array_flip(Section::withRecords($sections->pluck('id')->all()));
+        $counts = Section::learnerCounts($sections->pluck('id')->all());
 
-        return response()->json($sections->map(fn (Section $s) => $s->toApiArray(isset($recorded[$s->id]))));
+        return response()->json($sections->map(fn (Section $s) => $s->toApiArray(isset($recorded[$s->id]), $counts[$s->id] ?? 0)));
     }
 
     // Renames one of this teacher's sections in the active school year while it has no learner or classroom records.

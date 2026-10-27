@@ -303,4 +303,32 @@ class LearnerTest extends TestCase
         $this->actingAs($omar)->postJson('/api/learners', $this->payload())
             ->assertStatus(422)->assertJsonValidationErrors('section');
     }
+
+    public function test_full_section_is_allowed_while_another_has_room_and_blocked_once_all_are_full(): void
+    {
+        $joy = Section::where('name', 'Joy')->first();
+        $faith = Section::create(['school_year_id' => $this->year->id, 'teacher_id' => $this->tina->id, 'grade_level' => 'Kindergarten', 'name' => 'Faith']);
+        $this->enroll($joy, Section::CAPACITY);
+        // Only active enrollments take a seat.
+        $this->enroll($faith, 1, 'withdrawn');
+
+        $this->actingAs($this->tina)->getJson('/api/sections')->assertOk()
+            ->assertJsonPath('0.learnerCount', Section::CAPACITY)->assertJsonPath('0.capacity', Section::CAPACITY)
+            ->assertJsonPath('1.learnerCount', 0);
+
+        // Faith still has room, so the teacher may put one more into the full Joy.
+        $this->actingAs($this->tina)->postJson('/api/learners', $this->payload())->assertCreated();
+
+        $this->enroll($faith, Section::CAPACITY);
+        $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['section' => 'Faith']))
+            ->assertStatus(422)->assertJsonValidationErrors('section');
+    }
+
+    private function enroll(Section $section, int $count, string $status = 'active'): void
+    {
+        for ($i = 0; $i < $count; $i++) {
+            $learner = Learner::create(['first_name' => "L$i", 'last_name' => $section->name, 'birth_date' => '2021-01-01', 'gender' => 'Female']);
+            $learner->enrollments()->create(['school_year_id' => $this->year->id, 'section_id' => $section->id, 'enrolled_on' => '2026-06-01', 'status' => $status]);
+        }
+    }
 }

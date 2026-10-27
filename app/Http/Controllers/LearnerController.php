@@ -7,6 +7,7 @@ use App\Http\Requests\StoreLearnerRequest;
 use App\Http\Requests\UpdateLearnerRequest;
 use App\Models\Learner;
 use App\Models\SchoolYear;
+use App\Models\Section;
 use App\Models\Teacher;
 use Illuminate\Container\Attributes\CurrentUser;
 use Illuminate\Http\JsonResponse;
@@ -183,6 +184,13 @@ class LearnerController extends Controller
                 ->value('id');
             if (! $sectionId) {
                 throw ValidationException::withMessages(['section' => 'This section was just renamed. Reopen the form and pick it again.']);
+            }
+            // The teacher may still pick a full section, but not once every section is full.
+            // ponytail: soft cap, two enrolls at once can both see room; lockForUpdate the year's sections if a hard cap is needed.
+            $siblingIds = $teacher->sections()->where('school_year_id', $year->id)->where('grade_level', $data['gradeLevel'])->pluck('id')->all();
+            $counts = Section::learnerCounts($siblingIds);
+            if (collect($siblingIds)->every(fn ($id) => ($counts[$id] ?? 0) >= Section::CAPACITY)) {
+                throw ValidationException::withMessages(['section' => 'All sections are full ('.Section::CAPACITY.' learners each).']);
             }
             $learner->enrollments()->create([
                 'school_year_id' => $year->id,
