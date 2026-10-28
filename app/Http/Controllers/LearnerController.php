@@ -99,6 +99,8 @@ class LearnerController extends Controller
                     'guardian_name' => trim($data["guardianName_$i"]),
                     'contact_number' => $data["contactNumber_$i"],
                     'relationship_to_learner' => $relationship === 'OTHER' ? trim($data["relationshipOther_$i"]) : $relationship,
+                    'guardian_email' => $data["guardianEmail_$i"] ?? null,
+                    'occupation' => isset($data["occupation_$i"]) ? trim($data["occupation_$i"]) : null,
                 ];
                 isset($guardians[$i]) ? $guardians[$i]->update($guardian) : $learner->guardians()->create($guardian);
             }

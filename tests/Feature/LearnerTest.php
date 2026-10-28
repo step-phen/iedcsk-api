@@ -239,7 +239,7 @@ class LearnerTest extends TestCase
             'guardianName_0' => 'Maria Santos', 'contactNumber_0' => '09991234567',
             'relationshipToLearner_0' => 'OTHER', 'relationshipOther_0' => 'Aunt-in-law',
             'guardianName_1' => 'Lito Santos', 'contactNumber_1' => '09881234567',
-            'relationshipToLearner_1' => 'FATHER',
+            'relationshipToLearner_1' => 'FATHER', 'guardianEmail_1' => 'lito@example.com', 'occupation_1' => ' Driver ',
         ];
         // Keeping its own LRN is not a duplicate; a photo replaces the old one.
         $this->actingAs($this->tina)->post("/api/learners/{$id}", $edit + ['_method' => 'PUT', 'photo' => UploadedFile::fake()->image('new.png')], ['Accept' => 'application/json'])->assertOk();
@@ -251,6 +251,8 @@ class LearnerTest extends TestCase
         // Every guardian in the form is updated, not just the first.
         $this->assertSame(['Aunt-in-law', 'FATHER'], $learner->guardians->sortBy('id')->pluck('relationship_to_learner')->all());
         $this->assertSame(['Maria Santos', 'Lito Santos'], $learner->guardians->sortBy('id')->pluck('guardian_name')->all());
+        $this->assertSame([null, 'lito@example.com'], $learner->guardians->sortBy('id')->pluck('guardian_email')->all());
+        $this->assertSame([null, 'Driver'], $learner->guardians->sortBy('id')->pluck('occupation')->all());
         $this->assertTrue(Storage::disk('public')->exists($learner->avatar_url));
 
         $this->actingAs($this->tina)->putJson("/api/learners/{$id}", ['zipCode' => '12'] + $edit)->assertJsonValidationErrors('zipCode');
