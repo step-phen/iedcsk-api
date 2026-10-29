@@ -6,6 +6,7 @@ use App\Http\Requests\StoreExcuseSlipRequest;
 use App\Http\Requests\StoreLearnerRequest;
 use App\Http\Requests\UpdateLearnerRequest;
 use App\Models\Learner;
+use App\Models\LearnerSchoolYear;
 use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
@@ -43,29 +44,11 @@ class LearnerController extends Controller
         return response()->json($learners->map(fn (Learner $learner) => $learner->toListArray()));
     }
 
-    // Ready for Grade 1: every active checklist item from Q1 to Q4 is rated achieved or developing this school year.
+    // The rule itself lives in LearnerSchoolYear::whereReadyForGrade1; this list reads the active year.
     private function readyForGrade1($query)
     {
-        $items = DB::table('developmental_checklist_items')->where(['grade_level' => CurriculumController::GRADE_LEVEL, 'is_active' => true]);
-        $total = (clone $items)->count();
-        // Until the checklist covers all four quarters nobody can have finished the year, so the list stays empty.
-        if ((clone $items)->distinct()->count('quarter_number') < 4) {
-            return $query->whereRaw('false');
-        }
-
-        return $query->whereHas('enrollments', fn ($e) => $e
-            ->whereIn('status', ['active', 'completed'])
-            ->whereHas('schoolYear', fn ($y) => $y->where('status', 'active'))
-            ->whereRaw("(
-                SELECT count(*) FROM learner_developmental_checklists c
-                JOIN developmental_checklist_items i ON i.id = c.checklist_item_id
-                JOIN quarters q ON q.id = c.quarter_id
-                WHERE c.enrollment_id = learner_school_years.id
-                  AND q.school_year_id = learner_school_years.school_year_id
-                  AND q.quarter_number = i.quarter_number
-                  AND i.grade_level = ? AND i.is_active
-                  AND c.rating IN ('achieved', 'developing')
-            ) = ?", [CurriculumController::GRADE_LEVEL, $total]));
+        return $query->whereHas('enrollments', fn ($e) => LearnerSchoolYear::whereReadyForGrade1($e)
+            ->whereHas('schoolYear', fn ($y) => $y->where('status', 'active')));
     }
 
     // Scoped to the teacher's own learners, so another teacher's learner reads as not found.
