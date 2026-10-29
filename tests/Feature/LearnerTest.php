@@ -82,6 +82,13 @@ class LearnerTest extends TestCase
         $this->assertTrue(Storage::disk('public')->exists($learner->avatar_url));
     }
 
+    public function test_stores_spaced_mobile_number_as_digits(): void
+    {
+        $res = $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['contactNumber_0' => '0917 123 4567']))->assertCreated();
+
+        $this->assertSame('09171234567', Learner::find($res->json('learnerId'))->guardians->first()->contact_number);
+    }
+
     public function test_downscales_uploaded_photo_to_512px_jpeg(): void
     {
         Storage::fake('public');

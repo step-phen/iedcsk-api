@@ -17,6 +17,17 @@ class StoreLearnerRequest extends FormRequest
 
     private const MAX_GUARDIANS = 10;
 
+    // The form groups mobile numbers as "0917 123 4567"; validate and store the digits only.
+    protected function prepareForValidation(): void
+    {
+        foreach ($this->guardianIndexes() as $i) {
+            $key = "contactNumber_$i";
+            if (is_string($this->input($key))) {
+                $this->merge([$key => preg_replace('/[\s-]/', '', $this->input($key))]);
+            }
+        }
+    }
+
     public function rules(): array
     {
         $year = SchoolYear::active();
