@@ -119,6 +119,8 @@ class CurriculumTest extends TestCase
             ->assertJson(['item' => 'Counts to 5', 'quarter' => 1, 'activityName' => 'Count the Apples']);
         $add(['item' => 'Writes 1 to 5'])->assertCreated()->assertJson(['activityName' => null]);
         $add(['item' => 'counts to 5'])->assertJsonValidationErrors('item');
+        // A game already linked to a skill can't be linked to a second one.
+        $add(['item' => 'Counts apples', 'activityId' => $counting])->assertJsonValidationErrors('activityId');
         $this->assertSame([1, 2], DB::table('developmental_checklist_items')->orderBy('id')->pluck('display_order')->all());
 
         // It shows on the section's checklist, and the domain lists the games it can be linked to.
@@ -134,6 +136,9 @@ class CurriculumTest extends TestCase
         $edit(['item' => 'Counts 1 to 5', 'domainId' => $writing, 'quarter' => 3])->assertOk()
             ->assertJson(['itemId' => $first, 'item' => 'Counts 1 to 5', 'quarter' => 1, 'activityId' => null, 'activityName' => null]);
         $edit(['item' => 'counts 1 to 5', 'activityId' => $counting])->assertOk()->assertJson(['item' => 'counts 1 to 5', 'activityName' => 'Count the Apples']);
+        // Saving a skill keeps its own game; another skill can't take it.
+        $edit(['item' => 'Counts 1 to 5', 'activityId' => $counting])->assertOk();
+        $edit(['item' => 'Writes 1 to 5', 'activityId' => $counting], $domain['items'][1]['itemId'])->assertJsonValidationErrors('activityId');
         $this->assertSame([$math, 1], [DB::table('developmental_checklist_items')->where('id', $first)->value('domain_id'), DB::table('developmental_checklist_items')->where('id', $first)->value('quarter_number')]);
         $edit(['item' => 'Anything'], 99999)->assertNotFound();
     }

@@ -53,6 +53,14 @@ class SaveChecklistItemRequest extends FormRequest
                 ->exists()) {
                 $validator->errors()->add('activityId', 'Pick an activity from this domain and quarter.');
             }
+
+            // One game per skill: a second skill on the same game would double-count its result.
+            if ($this->filled('activityId') && DB::table('developmental_checklist_items')
+                ->where(['activity_id' => $this->integer('activityId'), 'is_active' => true])
+                ->when($this->route('item'), fn ($q, $id) => $q->where('id', '!=', $id))
+                ->exists()) {
+                $validator->errors()->add('activityId', 'This activity is already linked to another skill.');
+            }
         }];
     }
 
