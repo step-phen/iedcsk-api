@@ -78,6 +78,9 @@ class CurriculumTest extends TestCase
         $rate(['rating' => null, 'enrollmentId' => $abad])->assertOk();
         // Plaza played it, so the skill has been introduced and "/" (not yet introduced) no longer fits.
         $rate(['rating' => 'not_yet_observed'])->assertJsonValidationErrors(['rating' => 'This learner already played the activity, so this skill has been introduced.']);
+        // A "/" saved before the game was linked or played stays, so its remarks can still be saved.
+        DB::table('learner_developmental_checklists')->where(['enrollment_id' => $plaza, 'checklist_item_id' => $item])->update(['rating' => 'not_yet_observed']);
+        $rate(['rating' => 'not_yet_observed', 'remarks' => 'Taught next week.'])->assertOk()->assertJson(['rating' => 'not_yet_observed', 'remarks' => 'Taught next week.']);
         $rate(['rating' => 'achieved'])->assertOk()->assertJson(['rating' => 'achieved']);
         $this->assertSame('achieved', $rated());
         // Remarks are kept when a later save leaves them out, and go away with the rating.
