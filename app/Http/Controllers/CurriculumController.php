@@ -53,7 +53,7 @@ class CurriculumController extends Controller
             ->where('learner_school_years.section_id', $section->id)
             ->where('learner_school_years.status', 'active')
             ->orderBy('learners.last_name')->orderBy('learners.first_name')
-            ->get(['learner_school_years.id as enrollment_id', 'learners.id as learner_id', 'learners.first_name', 'learners.middle_name', 'learners.last_name']);
+            ->get(['learner_school_years.id as enrollment_id', 'learners.id as learner_id', 'learners.first_name', 'learners.middle_name', 'learners.last_name', 'learners.lrn']);
 
         $items = DB::table('developmental_checklist_items')
             ->leftJoin('activities', 'activities.id', '=', 'developmental_checklist_items.activity_id')
@@ -97,6 +97,7 @@ class CurriculumController extends Controller
                 'firstName' => $l->first_name,
                 'middleName' => $l->middle_name,
                 'lastName' => $l->last_name,
+                'lrn' => $l->lrn,
             ]),
             'ratings' => $ratings->map(fn ($r) => [
                 'enrollmentId' => $r->enrollment_id,
