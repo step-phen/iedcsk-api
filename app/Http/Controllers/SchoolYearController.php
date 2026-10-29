@@ -110,6 +110,12 @@ class SchoolYearController extends Controller
             || $schoolYear->end_date?->toDateString() !== $end;
 
         DB::transaction(function () use ($schoolYear, $name, $start, $end, $datesChanged) {
+            // Only an upcoming year can be edited: the active one is in use and a completed one is history.
+            // Read under the row lock, so a switch that just changed its status (activate updates this row) is seen.
+            $status = SchoolYear::whereKey($schoolYear->id)->lockForUpdate()->value('status');
+            if ($status !== 'upcoming') {
+                throw ValidationException::withMessages(['name' => "SY {$schoolYear->name} is {$status}, so it can't be edited."]);
+            }
             $schoolYear->update([
                 'name' => $name,
                 'start_date' => $start,
@@ -156,6 +162,11 @@ class SchoolYearController extends Controller
         DB::transaction(function () use ($schoolYear, $teacher, $sections) {
             // Switching years changes the active quarter too, so it waits on the same lock (Quarter::lockState).
             Quarter::lockState();
+            // A completed year is history: it never becomes the active year again. Read under the lock above,
+            // which every activation takes, so a year completed by a switch that just committed is refused too.
+            if (SchoolYear::whereKey($schoolYear->id)->value('status') === 'completed') {
+                throw ValidationException::withMessages(['schoolYear' => "SY {$schoolYear->name} is completed, so it can't be set as active again."]);
+            }
             $previous = SchoolYear::where('status', 'active')->lockForUpdate()->first();
             if ($sections) {
                 Section::setUp($schoolYear, $teacher, $sections);

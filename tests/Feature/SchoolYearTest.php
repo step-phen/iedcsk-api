@@ -131,6 +131,27 @@ class SchoolYearTest extends TestCase
         $this->assertSame('active', $next->refresh()->status);
     }
 
+    public function test_a_completed_year_cannot_be_set_as_active_again(): void
+    {
+        $tina = $this->teacher();
+        [$current, $next] = $this->twoYears();
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate", self::BOTH)->assertOk();
+        $current->update(['status' => 'completed']);
+        $next->update(['status' => 'active']);
+
+        $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}/activate")
+            ->assertStatus(422)->assertJsonValidationErrors(['schoolYear' => 'is completed']);
+        $this->assertSame(['completed', 'active'], [$current->refresh()->status, $next->refresh()->status]);
+
+        // Neither it nor the active year can be edited; only an upcoming one can.
+        foreach ([$current, $next] as $year) {
+            $before = $year->refresh()->only(['name', 'start_date', 'end_date']);
+            $this->actingAs($tina)->patchJson("/api/school-years/{$year->id}", ['name' => $year->name, 'startDate' => '2026-06-20', 'endDate' => '2027-04-20'])
+                ->assertStatus(422)->assertJsonValidationErrors(['name' => "is {$year->status}, so it can't be edited."]);
+            $this->assertEquals($before, $year->refresh()->only(['name', 'start_date', 'end_date']));
+        }
+    }
+
     public function test_old_quarter_ending_today_in_manila_is_not_completed_yet(): void
     {
         $tina = $this->teacher();
@@ -401,6 +422,8 @@ class SchoolYearTest extends TestCase
         $tina = $this->teacher();
         [$current, $next] = $this->twoYears();
         $this->setUpSections($tina, ['Joy'], $current);
+        // Switched away from before it ended, so it is upcoming again and can be edited; its sections stay.
+        $current->update(['status' => 'upcoming']);
 
         // The next year's section, built by hand.
         $hope = DB::table('sections')->insertGetId(['school_year_id' => $next->id, 'teacher_id' => $tina->id, 'name' => 'Hope', 'grade_level' => 'Kindergarten']);
@@ -463,7 +486,7 @@ class SchoolYearTest extends TestCase
     {
         [$tina, $current] = $this->yearsWithTimetables();
         $before = $this->schedules($current);
-        DB::table('quarters')->insert(['school_year_id' => $current->id, 'quarter_number' => 1, 'name' => '1st Quarter', 'start_date' => '2026-06-15', 'end_date' => '2026-08-31', 'status' => 'active']);
+        DB::table('quarters')->insert(['school_year_id' => $current->id, 'quarter_number' => 1, 'name' => '1st Quarter', 'start_date' => '2026-06-15', 'end_date' => '2026-08-31', 'status' => 'upcoming']);
 
         $this->actingAs($tina)->patchJson("/api/school-years/{$current->id}", ['name' => '2026-2027', 'startDate' => '2026-06-16', 'endDate' => '2027-04-30'])
             ->assertStatus(422)->assertJsonValidationErrors('startDate');
@@ -475,16 +498,16 @@ class SchoolYearTest extends TestCase
     public function test_updates_school_year_in_place(): void
     {
         $tina = Teacher::create(['username' => 'tina', 'name' => 'Tina', 'password_hash' => 'x']);
-        $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-15', 'end_date' => '2027-04-15', 'status' => 'active']);
+        $year = SchoolYear::create(['name' => '2026-2027', 'start_date' => '2026-06-15', 'end_date' => '2027-04-15']);
         SchoolYear::create(['name' => '2027-2028', 'start_date' => '2027-06-14', 'end_date' => '2028-04-14']);
         $url = "/api/school-years/{$year->id}";
 
         $this->patchJson($url, ['name' => '2026-2027', 'startDate' => '2026-06-01', 'endDate' => '2027-04-15'])->assertUnauthorized();
 
-        // Keeping its own name is fine; the row is updated, not duplicated, and stays active.
+        // Keeping its own name is fine; the row is updated, not duplicated, and stays upcoming.
         $this->actingAs($tina)->patchJson($url, ['name' => '2026-2027', 'startDate' => '2026-06-01', 'endDate' => '2027-04-30'])
             ->assertOk()
-            ->assertJson(['schoolYearId' => $year->id, 'startDate' => '2026-06-01', 'endDate' => '2027-04-30', 'status' => 'active']);
+            ->assertJson(['schoolYearId' => $year->id, 'startDate' => '2026-06-01', 'endDate' => '2027-04-30', 'status' => 'upcoming']);
         $this->assertSame(2, SchoolYear::count());
 
         $this->actingAs($tina)->patchJson($url, ['name' => '2027-2028', 'startDate' => '2026-06-01', 'endDate' => '2027-04-30'])
@@ -493,7 +516,7 @@ class SchoolYearTest extends TestCase
             ->assertStatus(422)->assertJsonValidationErrors('endDate');
 
         // The range can't shrink past the year's quarters.
-        DB::table('quarters')->insert(['school_year_id' => $year->id, 'quarter_number' => 1, 'name' => '1st Quarter', 'start_date' => '2026-06-15', 'end_date' => '2026-08-31', 'status' => 'active']);
+        DB::table('quarters')->insert(['school_year_id' => $year->id, 'quarter_number' => 1, 'name' => '1st Quarter', 'start_date' => '2026-06-15', 'end_date' => '2026-08-31', 'status' => 'upcoming']);
         $this->actingAs($tina)->patchJson($url, ['name' => '2026-2027', 'startDate' => '2026-07-01', 'endDate' => '2027-04-30'])
             ->assertStatus(422)->assertJsonValidationErrors('startDate');
         $this->actingAs($tina)->patchJson($url, ['name' => '2026-2027', 'startDate' => '2026-06-01', 'endDate' => '2026-08-01'])
