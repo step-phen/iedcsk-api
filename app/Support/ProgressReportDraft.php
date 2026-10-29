@@ -24,7 +24,9 @@ class ProgressReportDraft
 
     public const DIGITAL_DEVELOPING = 60;
 
-    private const CHECKLIST_LEVELS = ['achieved' => 'strength', 'developing' => 'developing', 'needs_support' => 'needs'];
+    // The school's codes: HA (achieved) and A (developing) are both accomplished, so both read as a strength;
+    // NS (needs_support) needs practice. "/" (not_yet_observed, not yet introduced) says nothing, so the score decides.
+    private const CHECKLIST_LEVELS = ['achieved' => 'strength', 'developing' => 'strength', 'needs_support' => 'needs'];
 
     // The report rows a section's active modules give, in print order.
     public static function rows(int $sectionId): Collection

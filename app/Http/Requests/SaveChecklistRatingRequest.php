@@ -29,7 +29,8 @@ class SaveChecklistRatingRequest extends FormRequest
         ];
     }
 
-    // A skill linked to a game is rated from the learner's result, so it waits until the learner has finished that game.
+    // A skill linked to a game: before the learner plays it, only "/" (not_yet_observed, Not yet introduced) fits;
+    // once played, the skill has been introduced and is rated HA, A or NS from the result.
     public function after(): array
     {
         return [function (Validator $validator) {
@@ -37,8 +38,15 @@ class SaveChecklistRatingRequest extends FormRequest
                 return;
             }
             $activityId = DB::table('developmental_checklist_items')->where('id', $this->integer('itemId'))->value('activity_id');
-            if ($activityId && ClassroomRecordController::latestResults(collect([$this->integer('enrollmentId')]), collect([$activityId]))->isEmpty()) {
+            if (! $activityId) {
+                return;
+            }
+            $played = ClassroomRecordController::latestResults(collect([$this->integer('enrollmentId')]), collect([$activityId]))->isNotEmpty();
+            $notIntroduced = $this->input('rating') === 'not_yet_observed';
+            if (! $played && ! $notIntroduced) {
                 $validator->errors()->add('rating', 'This learner has not finished the activity yet, so this skill cannot be rated.');
+            } elseif ($played && $notIntroduced) {
+                $validator->errors()->add('rating', 'This learner already played the activity, so this skill has been introduced.');
             }
         }];
     }

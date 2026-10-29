@@ -40,11 +40,15 @@ class ProgressReportDraftTest extends TestCase
         $item = (object) ['id' => 1, 'item' => 'Counts objects from 1 to 10', 'activity_id' => 9, 'activity_name' => 'Count', 'activity_format' => 'digital'];
         $result = (object) ['attempt_id' => 3, 'score' => '4', 'max_score' => '5', 'practical_rating' => null, 'remarks' => null, 'played_quarter' => 1, 'finished_at' => 'x'];
 
-        $skill = ProgressReportDraft::evidence($item, (object) ['id' => 2, 'rating' => 'developing', 'remarks' => null, 'assessed_at' => 'x'], $result);
-        $this->assertSame(['developing', 'checklist', 'assessed'], [$skill['level'], $skill['source'], $skill['status']]);
+        $skill = ProgressReportDraft::evidence($item, (object) ['id' => 2, 'rating' => 'needs_support', 'remarks' => null, 'assessed_at' => 'x'], $result);
+        $this->assertSame(['needs', 'checklist', 'assessed'], [$skill['level'], $skill['source'], $skill['status']]);
         $this->assertSame(4.0, $skill['result']['score']);
 
-        // "Not yet observed" says nothing, so the score decides.
+        // "A" (Accomplished, stored as developing) is accomplished, so it reads as a strength like "HA".
+        $skill = ProgressReportDraft::evidence($item, (object) ['id' => 2, 'rating' => 'developing', 'remarks' => null, 'assessed_at' => 'x'], $result);
+        $this->assertSame(['strength', 'checklist'], [$skill['level'], $skill['source']]);
+
+        // "/" (Not yet introduced) says nothing, so the score decides.
         $skill = ProgressReportDraft::evidence($item, (object) ['id' => 2, 'rating' => 'not_yet_observed', 'remarks' => null, 'assessed_at' => 'x'], $result);
         $this->assertSame(['strength', 'digital'], [$skill['level'], $skill['source']]);
 
