@@ -149,6 +149,7 @@ class SectionTest extends TestCase
             'learner_id' => DB::table('learners')->insertGetId(['first_name' => 'Ana', 'last_name' => 'Cruz', 'birth_date' => '2021-01-01', 'gender' => 'Female']),
             'school_year_id' => DB::table('sections')->where('id', $sectionId)->value('school_year_id'),
             'section_id' => $sectionId, 'enrolled_on' => '2026-06-01', 'status' => $status,
+            'withdrawn_on' => $status === 'withdrawn' ? '2026-06-01' : null,
         ]);
     }
 

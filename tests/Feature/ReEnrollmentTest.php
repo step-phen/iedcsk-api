@@ -66,7 +66,7 @@ class ReEnrollmentTest extends TestCase
     // An enrollment in $section's year with every quarter's skill rated $rating, one attendance day and one progress report.
     private function enrollWithRecords(Learner $learner, Section $section, string $status, string $rating): LearnerSchoolYear
     {
-        $enrollment = $learner->enrollments()->create(['school_year_id' => $section->school_year_id, 'section_id' => $section->id, 'enrolled_on' => '2025-06-01', 'status' => $status]);
+        $enrollment = $learner->enrollments()->create(['school_year_id' => $section->school_year_id, 'section_id' => $section->id, 'enrolled_on' => '2025-06-01', 'status' => $status, 'withdrawn_on' => $status === 'withdrawn' ? '2025-09-01' : null]);
         $quarterId = fn (int $q) => DB::table('quarters')->where(['school_year_id' => $section->school_year_id, 'quarter_number' => $q])->value('id');
         foreach ($this->items as $q => $item) {
             DB::table('learner_developmental_checklists')->insert(['enrollment_id' => $enrollment->id, 'checklist_item_id' => $item, 'quarter_id' => $quarterId($q), 'teacher_id' => $section->teacher_id, 'rating' => $rating, 'assessed_at' => '2025-08-01 08:00:00+08']);
@@ -155,7 +155,7 @@ class ReEnrollmentTest extends TestCase
         // Enrolled in a later year that was activated and then switched back.
         $later = $this->year('2027-2028', 'upcoming');
         $ana = $this->learner();
-        $ana->enrollments()->create(['school_year_id' => $later->id, 'section_id' => $this->section($later, $this->tina, 'Joy')->id, 'enrolled_on' => '2027-06-01', 'status' => 'withdrawn']);
+        $ana->enrollments()->create(['school_year_id' => $later->id, 'section_id' => $this->section($later, $this->tina, 'Joy')->id, 'enrolled_on' => '2027-06-01', 'status' => 'withdrawn', 'withdrawn_on' => '2027-07-01']);
 
         $this->actingAs($this->tina)->postJson("/api/learners/{$ana->id}/enrollments", $this->payload())
             ->assertStatus(422)->assertJsonValidationErrors(['learner' => 'does not come before SY 2026-2027']);

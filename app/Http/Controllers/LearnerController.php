@@ -6,11 +6,13 @@ use App\Http\Requests\ReEnrollLearnerRequest;
 use App\Http\Requests\StoreExcuseSlipRequest;
 use App\Http\Requests\StoreLearnerRequest;
 use App\Http\Requests\UpdateLearnerRequest;
+use App\Http\Requests\WithdrawLearnerRequest;
 use App\Models\Learner;
 use App\Models\LearnerSchoolYear;
 use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
+use App\Support\ClassSession;
 use Illuminate\Container\Attributes\CurrentUser;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -28,17 +30,17 @@ class LearnerController extends Controller
     // Optional ?section=<id>: teacher()->learners() already restricts to
     // sections this teacher owns, so an ID for another teacher's section
     // just yields an empty list here, never someone else's roster.
+    // Only learners still enrolled this year count; ?withWithdrawn=1 (the class list) adds the withdrawn ones.
     public function index(Request $request, #[CurrentUser] Teacher $teacher): JsonResponse
     {
-        $filters = $request->validate(['section' => ['nullable', 'integer'], 'ready' => ['nullable', 'boolean']]);
+        $filters = $request->validate(['section' => ['nullable', 'integer'], 'ready' => ['nullable', 'boolean'], 'withWithdrawn' => ['nullable', 'boolean']]);
         $sectionId = $filters['section'] ?? null;
+        $statuses = $request->boolean('withWithdrawn') ? ['active', 'withdrawn'] : ['active'];
 
         $learners = $teacher->learners()
-            ->when($sectionId, fn ($q, $id) => $q->whereHas(
-                'enrollments',
-                fn ($e) => $e->where('section_id', $id)
-                    ->whereHas('schoolYear', fn ($y) => $y->where('status', 'active')),
-            ))
+            ->whereHas('enrollments', fn ($e) => $e->whereIn('status', $statuses)
+                ->when($sectionId, fn ($e, $id) => $e->where('section_id', $id))
+                ->whereHas('schoolYear', fn ($y) => $y->where('status', 'active')))
             ->when($request->boolean('ready'), fn ($q) => $this->readyForGrade1($q))
             ->with('latestEnrollment.section')
             ->orderBy('last_name')->orderBy('first_name')
@@ -108,6 +110,9 @@ class LearnerController extends Controller
     {
         $enrollment = $this->findOwned($teacher, $learner)->latestEnrollment;
         $data = $request->validated();
+        if ($enrollment?->status !== 'active') {
+            throw ValidationException::withMessages(['date' => "This learner is withdrawn, so their attendance can't be changed."]);
+        }
 
         $absence = DB::table('attendance')->where(['enrollment_id' => $enrollment?->id, 'attendance_date' => $data['date'], 'status' => 'absent']);
         if (! $absence->exists()) {
@@ -115,6 +120,10 @@ class LearnerController extends Controller
         }
 
         DB::transaction(function () use ($absence, $enrollment, $data) {
+            // Re-checked under the enrollment lock, so a withdrawal that just committed refuses the slip.
+            if (! ClassSession::lockActive([$enrollment->id])) {
+                throw ValidationException::withMessages(['date' => "This learner is withdrawn, so their attendance can't be changed."]);
+            }
             $now = now();
             $absence->update(['status' => 'excused', 'excuse_reason' => $data['reason'], 'updated_at' => $now]);
             // That day's class roster follows the daily record.
@@ -124,6 +133,98 @@ class LearnerController extends Controller
         });
 
         return response()->json(['success' => true]);
+    }
+
+    // Withdraws the learner from this school year: their active-year enrollment becomes withdrawn on the given day,
+    // with the optional reason. Nothing is deleted. The profile, every record of the enrollment and every other
+    // enrollment stay as they are, and a later school year can re-enroll them.
+    public function withdraw(WithdrawLearnerRequest $request, #[CurrentUser] Teacher $teacher, int $learner): JsonResponse
+    {
+        $learner = $this->findOwned($teacher, $learner);
+        $data = $request->validated();
+        $enrollment = $learner->enrollments()
+            ->whereHas('schoolYear', fn ($y) => $y->where('status', 'active'))
+            ->whereHas('section', fn ($s) => $s->where('teacher_id', $teacher->id))
+            ->with('schoolYear')
+            ->first();
+        if ($enrollment?->status !== 'active') {
+            throw ValidationException::withMessages(['learner' => 'Only a learner currently enrolled this school year can be withdrawn.']);
+        }
+
+        $date = $data['withdrawnOn'];
+        $year = $enrollment->schoolYear;
+        $error = match (true) {
+            $date > ClassSession::today() => "The withdrawal date can't be in the future.",
+            $date < $enrollment->enrolled_on->toDateString() => "The withdrawal date can't be before the learner was enrolled ({$enrollment->enrolled_on->format('M j, Y')}).",
+            $year->start_date && $date < $year->start_date->toDateString() => "The withdrawal date can't be before SY {$year->name} starts ({$year->start_date->format('M j, Y')}).",
+            $year->end_date && $date > $year->end_date->toDateString() => "The withdrawal date can't be after SY {$year->name} ends ({$year->end_date->format('M j, Y')}).",
+            default => null,
+        };
+        if ($error) {
+            throw ValidationException::withMessages(['withdrawnOn' => $error]);
+        }
+
+        DB::transaction(function () use ($teacher, $enrollment, $date, $data) {
+            // FOR UPDATE on the section conflicts with the FOR SHARE that ClassroomController::start takes first, so a
+            // class start and a withdrawal in one section run one after the other: a start that went first has its class
+            // open (refused below), and a start that waits reads the learner as withdrawn and leaves them off the roster.
+            // The teacher filter is re-checked after the wait, so a handover that just committed wins.
+            if (! Section::whereKey($enrollment->section_id)->where('teacher_id', $teacher->id)->lockForUpdate()->first(['id'])) {
+                throw ValidationException::withMessages(['learner' => 'This section is no longer yours.']);
+            }
+            // The same lock attendance, ratings and learner joins take, then the status as it is now.
+            if (! ClassSession::lockActive([$enrollment->id])) {
+                throw ValidationException::withMessages(['learner' => 'Only a learner currently enrolled this school year can be withdrawn.']);
+            }
+            $classOpen = DB::table('classroom_sessions')
+                ->join('section_modules', 'section_modules.id', '=', 'classroom_sessions.section_module_id')
+                ->where('section_modules.section_id', $enrollment->section_id)
+                ->whereIn('classroom_sessions.status', ['scheduled', 'ongoing'])
+                ->exists();
+            if ($classOpen) {
+                throw ValidationException::withMessages(['learner' => 'A class is running in this section. End it first, then withdraw the learner.']);
+            }
+            // Under the enrollment lock, so no attendance mark or rating can land after this read.
+            $latest = $this->latestRecordDate($enrollment->id);
+            if ($latest && $date < $latest) {
+                throw ValidationException::withMessages(['withdrawnOn' => 'This learner has records up to '.Carbon::parse($latest)->format('M j, Y').'. Pick that day or later.']);
+            }
+
+            $enrollment->update([
+                'status' => 'withdrawn',
+                'withdrawn_on' => $date,
+                'withdrawal_reason' => filled($data['reason'] ?? null) ? trim($data['reason']) : null,
+            ]);
+        });
+
+        return response()->json(['learnerId' => $learner->id, 'enrollmentId' => $enrollment->id]);
+    }
+
+    // The latest Manila calendar day with any record of the enrollment, or null. Date columns count as they are;
+    // timestamps (all timestamptz) become the Manila day they fall on. Progress reports are left out: they describe a
+    // period, and an existing draft may still be finished after the withdrawal.
+    private function latestRecordDate(int $enrollmentId): ?string
+    {
+        $sql = <<<'SQL'
+            SELECT max(d) AS latest FROM (
+                SELECT attendance_date AS d FROM attendance WHERE enrollment_id = ?
+                UNION ALL
+                SELECT s.session_date FROM classroom_session_learners r
+                JOIN classroom_sessions s ON s.id = r.classroom_session_id WHERE r.enrollment_id = ?
+                UNION ALL
+                SELECT (assessed_at AT TIME ZONE 'Asia/Manila')::date FROM learner_developmental_checklists WHERE enrollment_id = ?
+                UNION ALL
+                SELECT (assessed_at AT TIME ZONE 'Asia/Manila')::date FROM learner_developmental_assessments WHERE enrollment_id = ?
+                UNION ALL
+                SELECT (greatest(assigned_at, completed_at) AT TIME ZONE 'Asia/Manila')::date FROM learner_activity_assignments WHERE enrollment_id = ?
+                UNION ALL
+                SELECT (greatest(t.started_at, t.demo_watched_at, t.submitted_at, t.evaluated_at) AT TIME ZONE 'Asia/Manila')::date
+                FROM learner_activity_attempts t
+                JOIN learner_activity_assignments a ON a.id = t.assignment_id WHERE a.enrollment_id = ?
+            ) records
+            SQL;
+
+        return DB::selectOne($sql, array_fill(0, 6, $enrollmentId))->latest;
     }
 
     public function store(StoreLearnerRequest $request, #[CurrentUser] Teacher $teacher): JsonResponse

@@ -51,7 +51,7 @@ class PromotionTest extends TestCase
     // Enrolls the learner and rates every quarter's skill with $rating in that section's year.
     private function enroll(Learner $learner, Section $section, string $rating, string $status = 'completed'): void
     {
-        $enrollment = $learner->enrollments()->create(['school_year_id' => $section->school_year_id, 'section_id' => $section->id, 'enrolled_on' => '2025-06-01', 'status' => $status]);
+        $enrollment = $learner->enrollments()->create(['school_year_id' => $section->school_year_id, 'section_id' => $section->id, 'enrolled_on' => '2025-06-01', 'status' => $status, 'withdrawn_on' => $status === 'withdrawn' ? '2025-06-01' : null]);
         foreach ($this->items as $q => $item) {
             DB::table('learner_developmental_checklists')->insert([
                 'enrollment_id' => $enrollment->id,

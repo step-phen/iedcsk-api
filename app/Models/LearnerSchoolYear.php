@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\DB;
 
 class LearnerSchoolYear extends Model
 {
-    protected $fillable = ['school_year_id', 'section_id', 'enrolled_on', 'status'];
+    protected $fillable = ['school_year_id', 'section_id', 'enrolled_on', 'status', 'withdrawn_on', 'withdrawal_reason'];
 
     protected function casts(): array
     {
-        return ['enrolled_on' => 'date'];
+        return ['enrolled_on' => 'date', 'withdrawn_on' => 'date'];
     }
 
     public function learner(): BelongsTo

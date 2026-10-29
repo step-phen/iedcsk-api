@@ -144,7 +144,9 @@ class ClassroomController extends Controller
         DB::transaction(function () use ($entries, $byLearner, $teacher, $sessionId, $now, $section) {
             // Same lock as a learner's join, then every entry is checked before anything is written.
             $enrollmentIds = collect($entries)->map(fn ($entry) => $byLearner[$entry['learnerId']]);
-            ClassSession::lockEnrollments($enrollmentIds);
+            if (! ClassSession::lockActive($enrollmentIds)) {
+                throw ValidationException::withMessages(['entries' => 'This learner is not in the section.']);
+            }
             $started = ClassSession::startedToday($section->id, $enrollmentIds)->flip();
             // An excuse slip settles the day; re-marking would keep its reason on a Present or Late record.
             $excused = DB::table('attendance')->whereIn('enrollment_id', $enrollmentIds)
@@ -206,14 +208,20 @@ class ClassroomController extends Controller
             throw ValidationException::withMessages(['result' => 'This learner has not finished the demonstration yet.']);
         }
 
-        DB::table('learner_activity_attempts')->where('id', $attemptId)->update([
-            'status' => 'evaluated',
-            'practical_rating' => $data['result'],
-            'remarks' => filled($data['remarks'] ?? null) ? trim($data['remarks']) : null,
-            'evaluated_by' => $teacher->id,
-            'evaluated_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::transaction(function () use ($enrollmentId, $attemptId, $data, $teacher) {
+            // Re-checked under the enrollment lock, so a withdrawal that just committed refuses the rating.
+            if (! ClassSession::lockActive([$enrollmentId])) {
+                throw ValidationException::withMessages(['learnerId' => 'This learner is not in the section.']);
+            }
+            DB::table('learner_activity_attempts')->where('id', $attemptId)->update([
+                'status' => 'evaluated',
+                'practical_rating' => $data['result'],
+                'remarks' => filled($data['remarks'] ?? null) ? trim($data['remarks']) : null,
+                'evaluated_by' => $teacher->id,
+                'evaluated_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
 
         return response()->json(['success' => true]);
     }
