@@ -29,7 +29,8 @@ class SaveChecklistRatingRequest extends FormRequest
         ];
     }
 
-    // A skill linked to a game is rated from the learner's result, so it waits until the learner has finished that game.
+    // A skill linked to a game: before the learner plays it, only "/" (not_yet_observed, Not yet introduced) fits;
+    // once played, the skill has been introduced and is rated HA, A or NS from the result.
     public function after(): array
     {
         return [function (Validator $validator) {
@@ -37,10 +38,29 @@ class SaveChecklistRatingRequest extends FormRequest
                 return;
             }
             $activityId = DB::table('developmental_checklist_items')->where('id', $this->integer('itemId'))->value('activity_id');
-            if ($activityId && ClassroomRecordController::latestResults(collect([$this->integer('enrollmentId')]), collect([$activityId]))->isEmpty()) {
+            if (! $activityId) {
+                return;
+            }
+            $played = ClassroomRecordController::latestResults(collect([$this->integer('enrollmentId')]), collect([$activityId]))->isNotEmpty();
+            $notIntroduced = $this->input('rating') === 'not_yet_observed';
+            if (! $played && ! $notIntroduced) {
                 $validator->errors()->add('rating', 'This learner has not finished the activity yet, so this skill cannot be rated.');
+            } elseif ($played && $notIntroduced && ! $this->keepsSavedNotIntroduced()) {
+                $validator->errors()->add('rating', 'This learner already played the activity, so this skill has been introduced.');
             }
         }];
+    }
+
+    // A "/" saved before the learner played (or before the game was linked) stays valid, so its remarks can still be saved.
+    private function keepsSavedNotIntroduced(): bool
+    {
+        return DB::table('learner_developmental_checklists')
+            ->join('quarters', 'quarters.id', '=', 'learner_developmental_checklists.quarter_id')
+            ->where('learner_developmental_checklists.enrollment_id', $this->integer('enrollmentId'))
+            ->where('learner_developmental_checklists.checklist_item_id', $this->integer('itemId'))
+            ->where('quarters.quarter_number', $this->integer('quarter'))
+            ->where('learner_developmental_checklists.rating', 'not_yet_observed')
+            ->exists();
     }
 
     public function messages(): array

@@ -82,6 +82,13 @@ class LearnerTest extends TestCase
         $this->assertTrue(Storage::disk('public')->exists($learner->avatar_url));
     }
 
+    public function test_stores_spaced_mobile_number_as_digits(): void
+    {
+        $res = $this->actingAs($this->tina)->postJson('/api/learners', $this->payload(['contactNumber_0' => '0917 123 4567']))->assertCreated();
+
+        $this->assertSame('09171234567', Learner::find($res->json('learnerId'))->guardians->first()->contact_number);
+    }
+
     public function test_downscales_uploaded_photo_to_512px_jpeg(): void
     {
         Storage::fake('public');
@@ -227,8 +234,19 @@ class LearnerTest extends TestCase
             'enrollment_id' => DB::table('learner_school_years')->where('learner_id', $id)->value('id'),
             'checklist_item_id' => $same, 'quarter_id' => $q1, 'teacher_id' => $this->tina->id, 'rating' => 'developing', 'assessed_at' => now(),
         ]);
+        // A skill linked to a game the learner has not played reads as "/" (not yet introduced) until it is played or rated.
+        $module = DB::table('modules')->insertGetId(['code' => 'reading', 'name' => 'Reading', 'grade_level' => 'Kindergarten']);
+        $game = DB::table('activities')->insertGetId(['lesson_id' => DB::table('lessons')->insertGetId([
+            'module_domain_id' => DB::table('module_domains')->insertGetId(['module_id' => $module, 'domain_id' => $domain]), 'title' => 'Words', 'quarter_number' => 2, 'week_number' => 1, 'sequence_order' => 1,
+        ]), 'activity_code' => 'RD-Q2W1-01', 'name' => 'Word Match', 'instructions' => '-', 'activity_format' => 'digital', 'sequence_order' => 1]);
+        DB::table('developmental_checklist_items')->insert(['domain_id' => $domain, 'item' => 'Matches words', 'grade_level' => 'Kindergarten', 'quarter_number' => 2, 'activity_id' => $game, 'display_order' => 2]);
         $progress = $this->actingAs($this->tina)->getJson("/api/learners/{$id}")->json('progress');
-        $this->assertSame([['Tells same from different', 1, 'developing'], ['Reads short words', 2, null]], array_map(fn ($p) => [$p['item'], $p['quarter'], $p['rating']], $progress));
+        $this->assertSame([['Tells same from different', 1, 'developing'], ['Reads short words', 2, null], ['Matches words', 2, 'not_yet_observed']], array_map(fn ($p) => [$p['item'], $p['quarter'], $p['rating']], $progress));
+        // Once played, it waits for the teacher's rating.
+        DB::table('learner_activity_attempts')->insert(['assignment_id' => DB::table('learner_activity_assignments')->insertGetId([
+            'enrollment_id' => DB::table('learner_school_years')->where('learner_id', $id)->value('id'), 'activity_id' => $game, 'quarter_id' => $q1, 'teacher_id' => $this->tina->id, 'assigned_at' => now(), 'status' => 'completed', 'completed_at' => now(),
+        ]), 'attempt_number' => 1, 'status' => 'evaluated', 'score' => 4, 'max_score' => 5, 'started_at' => now(), 'evaluated_at' => now()]);
+        $this->assertNull($this->actingAs($this->tina)->getJson("/api/learners/{$id}")->json('progress.2.rating'));
         $this->assertSame('Reading and Language Development', $progress[0]['domainName']);
 
         $edit = [

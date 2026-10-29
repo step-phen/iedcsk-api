@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Http\Controllers\ClassroomRecordController;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -113,20 +114,25 @@ class Learner extends Model
             ->get(['learner_developmental_checklists.checklist_item_id', 'quarters.quarter_number', 'learner_developmental_checklists.rating'])
             ->keyBy(fn ($r) => $r->checklist_item_id.'-'.$r->quarter_number);
 
-        return DB::table('developmental_checklist_items')
+        $items = DB::table('developmental_checklist_items')
             ->join('developmental_domains', 'developmental_domains.id', '=', 'developmental_checklist_items.domain_id')
             ->leftJoin('activities', 'activities.id', '=', 'developmental_checklist_items.activity_id')
             ->where(['developmental_checklist_items.grade_level' => $enrollment->section?->grade_level, 'developmental_checklist_items.is_active' => true])
             ->orderBy('developmental_checklist_items.quarter_number')->orderBy('developmental_domains.display_order')->orderBy('developmental_checklist_items.display_order')
-            ->get(['developmental_checklist_items.id', 'developmental_checklist_items.item', 'developmental_checklist_items.quarter_number', 'developmental_domains.id as domain_id', 'developmental_domains.name as domain_name', 'activities.name as activity_name'])
-            ->map(fn ($i) => [
-                'itemId' => $i->id,
-                'item' => $i->item,
-                'quarter' => $i->quarter_number,
-                'domainId' => $i->domain_id,
-                'domainName' => $i->domain_name,
-                'activityName' => $i->activity_name,
-                'rating' => $ratings[$i->id.'-'.$i->quarter_number]->rating ?? null,
-            ])->all();
+            ->get(['developmental_checklist_items.id', 'developmental_checklist_items.item', 'developmental_checklist_items.quarter_number', 'developmental_checklist_items.activity_id', 'developmental_domains.id as domain_id', 'developmental_domains.name as domain_name', 'activities.name as activity_name']);
+        $played = ClassroomRecordController::latestResults(collect([$enrollment->id]), $items->pluck('activity_id')->filter()->unique()->values())
+            ->pluck('activity_id')->flip();
+
+        return $items->map(fn ($i) => [
+            'itemId' => $i->id,
+            'item' => $i->item,
+            'quarter' => $i->quarter_number,
+            'domainId' => $i->domain_id,
+            'domainName' => $i->domain_name,
+            'activityName' => $i->activity_name,
+            // A skill linked to a game the learner has not played is "/" (not yet introduced), as the checklist shows it.
+            'rating' => $ratings[$i->id.'-'.$i->quarter_number]->rating
+                ?? ($i->activity_id && ! isset($played[$i->activity_id]) ? 'not_yet_observed' : null),
+        ])->all();
     }
 }

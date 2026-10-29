@@ -73,6 +73,14 @@ class CurriculumTest extends TestCase
         // Abad has not finished the linked game, so the skill cannot be rated for her yet; clearing still works.
         $rate(['rating' => 'achieved', 'enrollmentId' => $abad])->assertJsonValidationErrors(['rating' => 'This learner has not finished the activity yet, so this skill cannot be rated.']);
         $rate(['rating' => null, 'enrollmentId' => $abad])->assertOk();
+        // Before she plays it, only "/" (not yet introduced) fits.
+        $rate(['rating' => 'not_yet_observed', 'enrollmentId' => $abad])->assertOk()->assertJson(['rating' => 'not_yet_observed']);
+        $rate(['rating' => null, 'enrollmentId' => $abad])->assertOk();
+        // Plaza played it, so the skill has been introduced and "/" (not yet introduced) no longer fits.
+        $rate(['rating' => 'not_yet_observed'])->assertJsonValidationErrors(['rating' => 'This learner already played the activity, so this skill has been introduced.']);
+        // A "/" saved before the game was linked or played stays, so its remarks can still be saved.
+        DB::table('learner_developmental_checklists')->where(['enrollment_id' => $plaza, 'checklist_item_id' => $item])->update(['rating' => 'not_yet_observed']);
+        $rate(['rating' => 'not_yet_observed', 'remarks' => 'Taught next week.'])->assertOk()->assertJson(['rating' => 'not_yet_observed', 'remarks' => 'Taught next week.']);
         $rate(['rating' => 'achieved'])->assertOk()->assertJson(['rating' => 'achieved']);
         $this->assertSame('achieved', $rated());
         // Remarks are kept when a later save leaves them out, and go away with the rating.
@@ -782,6 +790,8 @@ class CurriculumTest extends TestCase
         $rated = $item('Balances', null);
         $plain = $item('Skips', null);
         DB::table('learner_developmental_checklists')->insert(['enrollment_id' => $oldEnrollment, 'checklist_item_id' => $rated, 'quarter_id' => $oldQuarter, 'teacher_id' => $tina->id, 'rating' => 'achieved', 'assessed_at' => '2025-07-02']);
+        // "/" (not yet introduced) only says the skill was not taught yet, so it does not lock the skill.
+        DB::table('learner_developmental_checklists')->insert(['enrollment_id' => $oldEnrollment, 'checklist_item_id' => $plain, 'quarter_id' => $oldQuarter, 'teacher_id' => $tina->id, 'rating' => 'not_yet_observed', 'assessed_at' => '2025-07-02']);
 
         $video = fn () => UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
         $payload = ['name' => 'Jump', 'description' => 'Jumping.', 'instructions' => 'Jump twice.', 'teacherGuidelines' => 'Two jumps.'];

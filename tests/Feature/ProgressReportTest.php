@@ -114,8 +114,9 @@ class ProgressReportTest extends TestCase
 
         $math = $this->row($report, 'MATH READINESS');
         $this->assertSame(
-            "Gabriel matches basic shapes in the completed digital activity.\n\n"
-            .'He is still learning to count objects from 1 to 10, as observed by the teacher. He needs more practice to match numerals 1 to 10 with groups of that many objects in the completed digital activity.',
+            // "A" (Accomplished, stored as developing) reads as a strength.
+            "Gabriel counts objects from 1 to 10, as observed by the teacher. He matches basic shapes in the completed digital activity.\n\n"
+            .'He needs more practice to match numerals 1 to 10 with groups of that many objects in the completed digital activity.',
             $math['developmentObserved'],
         );
         $this->assertSame($math['developmentObserved'], $math['generatedObserved']);

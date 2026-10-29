@@ -53,7 +53,7 @@ class CurriculumController extends Controller
             ->where('learner_school_years.section_id', $section->id)
             ->where('learner_school_years.status', 'active')
             ->orderBy('learners.last_name')->orderBy('learners.first_name')
-            ->get(['learner_school_years.id as enrollment_id', 'learners.id as learner_id', 'learners.first_name', 'learners.middle_name', 'learners.last_name']);
+            ->get(['learner_school_years.id as enrollment_id', 'learners.id as learner_id', 'learners.first_name', 'learners.middle_name', 'learners.last_name', 'learners.lrn']);
 
         $items = DB::table('developmental_checklist_items')
             ->leftJoin('activities', 'activities.id', '=', 'developmental_checklist_items.activity_id')
@@ -97,6 +97,7 @@ class CurriculumController extends Controller
                 'firstName' => $l->first_name,
                 'middleName' => $l->middle_name,
                 'lastName' => $l->last_name,
+                'lrn' => $l->lrn,
             ]),
             'ratings' => $ratings->map(fn ($r) => [
                 'enrollmentId' => $r->enrollment_id,
@@ -181,8 +182,11 @@ class CurriculumController extends Controller
                     'assessed_at' => now(),
                     'updated_at' => now(),
                 ] + (array_key_exists('remarks', $data) ? ['remarks' => $data['remarks']] : []));
-                // A rating can be given before any quarter is active, so a first one starts the year too.
-                SchoolYear::markStarted($section->school_year_id);
+                // A rating can be given before any quarter is active, so a first one starts the year too;
+                // "/" (not yet introduced) records that nothing was taught, so it does not.
+                if ($data['rating'] !== 'not_yet_observed') {
+                    SchoolYear::markStarted($section->school_year_id);
+                }
             }
         });
         $remarks = DB::table('learner_developmental_checklists')->where($key)->value('remarks');
@@ -798,7 +802,8 @@ class CurriculumController extends Controller
         $usedActivities = DB::table('classroom_session_activities')->select('activity_id')
             ->union(DB::table('learner_activity_assignments')->select('activity_id'));
 
-        return DB::table('learner_developmental_checklists')->whereIn('checklist_item_id', $ids)->select('checklist_item_id as id')
+        // "/" (not_yet_observed, Not yet introduced) records only that the skill was not taught yet, so it locks nothing.
+        return DB::table('learner_developmental_checklists')->whereIn('checklist_item_id', $ids)->where('rating', '!=', 'not_yet_observed')->select('checklist_item_id as id')
             ->union(DB::table('developmental_checklist_items')->whereIn('id', $ids)->whereIn('activity_id', $usedActivities)->select('id'))
             ->pluck('id')->map(fn ($id) => (int) $id)->all();
     }
