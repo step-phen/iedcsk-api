@@ -91,6 +91,8 @@ Route::middleware(['auth:sanctum', EnsureTeacherCanWork::class])->group(function
     Route::get('/learners/{learner}', [LearnerController::class, 'show'])->whereNumber('learner');
     Route::put('/learners/{learner}', [LearnerController::class, 'update'])->whereNumber('learner');
     Route::put('/learners/{learner}/excuse-slip', [LearnerController::class, 'excuseSlip'])->whereNumber('learner');
+    Route::get('/learners/re-enrollable', [LearnerController::class, 'reEnrollable']);
+    Route::post('/learners/{learner}/enrollments', [LearnerController::class, 'reEnroll'])->whereNumber('learner');
 
     Route::get('/promotions', [PromotionController::class, 'index']);
     Route::get('/promotions/{schoolYear}', [PromotionController::class, 'show'])->whereNumber('schoolYear');

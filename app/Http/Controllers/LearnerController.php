@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ReEnrollLearnerRequest;
 use App\Http\Requests\StoreExcuseSlipRequest;
 use App\Http\Requests\StoreLearnerRequest;
 use App\Http\Requests\UpdateLearnerRequest;
@@ -11,6 +12,8 @@ use App\Models\SchoolYear;
 use App\Models\Section;
 use App\Models\Teacher;
 use Illuminate\Container\Attributes\CurrentUser;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -159,27 +162,10 @@ class LearnerController extends Controller
                 ]);
             }
 
-            // Enrolling into the teacher's section is what makes the learner theirs. FOR SHARE waits out a rename
-            // in progress (SectionController::update) and then sees its new name, so a stale name finds no section.
-            $sectionId = $teacher->sections()
-                ->where('school_year_id', $year->id)
-                ->where('grade_level', $data['gradeLevel'])
-                ->where('name', $data['section'])
-                ->sharedLock()
-                ->value('id');
-            if (! $sectionId) {
-                throw ValidationException::withMessages(['section' => 'This section was just renamed. Reopen the form and pick it again.']);
-            }
-            // The teacher may still pick a full section, but not once every section is full.
-            // ponytail: soft cap, two enrolls at once can both see room; lockForUpdate the year's sections if a hard cap is needed.
-            $siblingIds = $teacher->sections()->where('school_year_id', $year->id)->where('grade_level', $data['gradeLevel'])->pluck('id')->all();
-            $counts = Section::learnerCounts($siblingIds);
-            if (collect($siblingIds)->every(fn ($id) => ($counts[$id] ?? 0) >= Section::CAPACITY)) {
-                throw ValidationException::withMessages(['section' => 'All sections are full ('.Section::CAPACITY.' learners each).']);
-            }
+            // Enrolling into the teacher's section is what makes the learner theirs.
             $learner->enrollments()->create([
                 'school_year_id' => $year->id,
-                'section_id' => $sectionId,
+                'section_id' => $this->enrollableSectionId($teacher, $year, $data['gradeLevel'], $data['section']),
                 'enrolled_on' => Carbon::now('Asia/Manila')->toDateString(),
                 'status' => 'active',
             ]);
@@ -192,6 +178,122 @@ class LearnerController extends Controller
         });
 
         return response()->json(['learnerId' => $learner->id], 201);
+    }
+
+    // Search for re-enrollment: learners this teacher taught in an earlier year who are not yet in the active one,
+    // by name or LRN. Each row says why it can't be re-enrolled, if it can't, so the page can show it disabled.
+    public function reEnrollable(Request $request, #[CurrentUser] Teacher $teacher): JsonResponse
+    {
+        $q = $request->validate(['q' => ['required', 'string', 'min:2', 'max:100']])['q'];
+        $year = SchoolYear::active();
+        $like = '%'.addcslashes($q, '%_\\').'%';
+
+        $learners = $this->taughtLearners($teacher)
+            ->when($year, fn ($l) => $l->whereDoesntHave('enrollments', fn ($e) => $e->where('school_year_id', $year->id)))
+            ->where(fn ($l) => $l->where('lrn', 'like', addcslashes($q, '%_\\').'%')
+                ->orWhereRaw("concat_ws(' ', first_name, middle_name, last_name) ILIKE ?", [$like])
+                ->orWhereRaw("concat_ws(' ', first_name, last_name) ILIKE ?", [$like]))
+            ->with(['latestEnrollment.section', 'latestEnrollment.schoolYear'])
+            ->orderBy('last_name')->orderBy('first_name')
+            ->limit(20)
+            ->get();
+
+        return response()->json($learners->map(fn (Learner $learner) => $learner->toListArray() + [
+            // gradeLevel and section above come from this same latest enrollment.
+            'lastSchoolYear' => $learner->latestEnrollment?->schoolYear?->name,
+            'lastStatus' => $learner->latestEnrollment?->status,
+            'blockedReason' => $year ? $this->reEnrollBlock($learner, $year) : 'There is no active school year.',
+        ]));
+    }
+
+    // Enrolls a learner the teacher taught before into the active school year: one new enrollment on the same
+    // profile. Earlier enrollments and every record tied to them (attendance, checklist, activities, reports) are
+    // left as they are, and the new enrollment starts with none.
+    public function reEnroll(ReEnrollLearnerRequest $request, #[CurrentUser] Teacher $teacher, int $learner): JsonResponse
+    {
+        $learner = $this->taughtLearners($teacher)->findOrFail($learner);
+        // The request already required the active year by name, so there is one.
+        $year = SchoolYear::active();
+        $data = $request->validated();
+
+        try {
+            $enrollment = DB::transaction(function () use ($learner, $teacher, $year, $data) {
+                // Two re-enrollments of one learner at once run one after the other, so the second sees the first's row.
+                Learner::whereKey($learner->id)->lockForUpdate()->first();
+                if ($reason = $this->reEnrollBlock($learner, $year)) {
+                    throw ValidationException::withMessages(['learner' => $reason]);
+                }
+
+                return $learner->enrollments()->create([
+                    'school_year_id' => $year->id,
+                    'section_id' => $this->enrollableSectionId($teacher, $year, $data['gradeLevel'], $data['section']),
+                    'enrolled_on' => Carbon::now('Asia/Manila')->toDateString(),
+                    'status' => 'active',
+                ]);
+            });
+        } catch (UniqueConstraintViolationException) {
+            // The unique (learner, school year) key backs the lock up.
+            throw ValidationException::withMessages(['learner' => "Already enrolled in SY {$year->name}."]);
+        }
+
+        return response()->json(['learnerId' => $learner->id, 'enrollmentId' => $enrollment->id], 201);
+    }
+
+    // Why the learner can't be enrolled into $year, or null if they can. Grade level rules are not bypassed:
+    // a learner who met Ready for Grade 1 moves on (a withdrawn or transferred year never counts as met),
+    // and the Add Learner age window applies. A completed status alone decides nothing.
+    private function reEnrollBlock(Learner $learner, SchoolYear $year): ?string
+    {
+        $enrollments = $learner->enrollments()->with('schoolYear')->get();
+        if ($enrollments->contains('school_year_id', $year->id)) {
+            return "Already enrolled in SY {$year->name}.";
+        }
+        $later = $enrollments->first(fn (LearnerSchoolYear $e) => $e->schoolYear->start_date && $year->start_date && $e->schoolYear->start_date->gte($year->start_date));
+        if ($later) {
+            return "Already enrolled in SY {$later->schoolYear->name}, which does not come before SY {$year->name}.";
+        }
+        $ready = LearnerSchoolYear::whereReadyForGrade1($learner->enrollments()->getQuery())->with('schoolYear')->first();
+        if ($ready) {
+            return "Met Ready for Grade 1 in SY {$ready->schoolYear->name}, so they move on to Grade 1 instead of repeating Kindergarten.";
+        }
+        [$earliest, $latest] = StoreLearnerRequest::birthdateBounds();
+        $birthdate = $learner->birth_date->toDateString();
+        if ($birthdate <= $earliest || $birthdate > $latest) {
+            return StoreLearnerRequest::AGE_MESSAGE;
+        }
+
+        return null;
+    }
+
+    // The teacher's section in $year with that grade and name, refused once every section of the grade is full.
+    // FOR SHARE waits out a rename in progress (SectionController::update) and then sees its new name, so a stale
+    // name finds no section.
+    private function enrollableSectionId(Teacher $teacher, SchoolYear $year, string $gradeLevel, string $name): int
+    {
+        $sectionId = $teacher->sections()
+            ->where('school_year_id', $year->id)
+            ->where('grade_level', $gradeLevel)
+            ->where('name', $name)
+            ->sharedLock()
+            ->value('id');
+        if (! $sectionId) {
+            throw ValidationException::withMessages(['section' => 'This section was just renamed. Reopen the form and pick it again.']);
+        }
+        // The teacher may still pick a full section, but not once every section is full.
+        // ponytail: soft cap, two enrolls at once can both see room; lockForUpdate the year's sections if a hard cap is needed.
+        $siblingIds = $teacher->sections()->where('school_year_id', $year->id)->where('grade_level', $gradeLevel)->pluck('id')->all();
+        $counts = Section::learnerCounts($siblingIds);
+        if (collect($siblingIds)->every(fn ($id) => ($counts[$id] ?? 0) >= Section::CAPACITY)) {
+            throw ValidationException::withMessages(['section' => 'All sections are full ('.Section::CAPACITY.' learners each).']);
+        }
+
+        return $sectionId;
+    }
+
+    // Learners with an enrollment, in any year, in a section this teacher holds (a handover passes past sections on too).
+    private function taughtLearners(Teacher $teacher): Builder
+    {
+        return Learner::whereHas('enrollments.section', fn (Builder $s) => $s->where('teacher_id', $teacher->id));
     }
 
     private function findOwned(Teacher $teacher, int $learnerId): Learner
