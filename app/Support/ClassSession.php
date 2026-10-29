@@ -22,6 +22,16 @@ class ClassSession
         DB::table('learner_school_years')->whereIn('id', collect($enrollmentIds)->all())->orderBy('id')->lockForUpdate()->pluck('id');
     }
 
+    // lockEnrollments, then whether every one of them is still active. A write that checked "active" before its
+    // transaction re-checks here, so a withdrawal that committed in between refuses it instead of slipping past.
+    public static function lockActive(iterable $enrollmentIds): bool
+    {
+        $ids = collect($enrollmentIds)->unique()->values();
+        self::lockEnrollments($ids);
+
+        return DB::table('learner_school_years')->whereIn('id', $ids->all())->where('status', 'active')->count() === $ids->count();
+    }
+
     // Enrollments that started an activity today (Manila date) in any of this section's classes, any lesson.
     public static function startedToday(int $sectionId, iterable $enrollmentIds): Collection
     {

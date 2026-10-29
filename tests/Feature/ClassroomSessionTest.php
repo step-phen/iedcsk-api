@@ -377,7 +377,7 @@ class ClassroomSessionTest extends TestCase
         $game = $this->activity('RD-Q1W1-01', 'digital');
         $hop = $this->activity('RD-Q1W1-02', 'practical');
         // Only Ana stays enrolled, so she alone decides the count.
-        DB::table('learner_school_years')->whereIn('learner_id', [$this->kids['Ben'], $this->kids['Cara']])->update(['status' => 'withdrawn']);
+        DB::table('learner_school_years')->whereIn('learner_id', [$this->kids['Ben'], $this->kids['Cara']])->update(['status' => 'withdrawn', 'withdrawn_on' => DB::raw('enrolled_on')]);
         $this->actingAs($this->tina)->putJson("/api/sections/{$this->joy}/attendance", ['entries' => [['learnerId' => $this->kids['Ana'], 'status' => 'PRESENT']]])->assertOk();
         $badge = fn () => collect($this->actingAs($this->tina)->getJson("/api/modules?section={$this->joy}")->assertOk()->json())
             ->flatMap(fn ($m) => $m['lessons'])->firstWhere('id', $this->lesson)['completion'];

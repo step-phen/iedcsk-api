@@ -9,6 +9,7 @@ use App\Http\Controllers\LearnerController;
 use App\Http\Controllers\LearnerSessionController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProgressReportController;
+use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\QuarterController;
 use App\Http\Controllers\SchoolYearController;
 use App\Http\Controllers\SectionController;
@@ -90,6 +91,12 @@ Route::middleware(['auth:sanctum', EnsureTeacherCanWork::class])->group(function
     Route::get('/learners/{learner}', [LearnerController::class, 'show'])->whereNumber('learner');
     Route::put('/learners/{learner}', [LearnerController::class, 'update'])->whereNumber('learner');
     Route::put('/learners/{learner}/excuse-slip', [LearnerController::class, 'excuseSlip'])->whereNumber('learner');
+    Route::get('/learners/re-enrollable', [LearnerController::class, 'reEnrollable']);
+    Route::post('/learners/{learner}/enrollments', [LearnerController::class, 'reEnroll'])->whereNumber('learner');
+    Route::post('/learners/{learner}/withdraw', [LearnerController::class, 'withdraw'])->whereNumber('learner');
+
+    Route::get('/promotions', [PromotionController::class, 'index']);
+    Route::get('/promotions/{schoolYear}', [PromotionController::class, 'show'])->whereNumber('schoolYear');
 });
 
 // Learner devices have no login; LearnerSessionController identifies them through the session.

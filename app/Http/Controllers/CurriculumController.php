@@ -171,6 +171,11 @@ class CurriculumController extends Controller
         $key = ['enrollment_id' => $data['enrollmentId'], 'checklist_item_id' => $data['itemId'], 'quarter_id' => $quarterId];
         // A first rating makes the item protected, so it waits on the lock checklist item edits take.
         DB::transaction(function () use ($key, $data, $teacher, $section) {
+            // The request checked the enrollment is active; re-checked under its lock, first, so the order stays
+            // enrollments, quarter, year and a withdrawal that just committed refuses the rating.
+            if (! ClassSession::lockActive([$data['enrollmentId']])) {
+                throw ValidationException::withMessages(['enrollmentId' => 'This learner is not in the section.']);
+            }
             Quarter::lockState();
             // Remarks live on the rating row, so clearing the rating clears its remarks too.
             if ($data['rating'] === null) {

@@ -47,6 +47,7 @@ class LessonCompletionTest extends TestCase
         return DB::table('learner_school_years')->insertGetId([
             'learner_id' => DB::table('learners')->insertGetId(['first_name' => $name, 'last_name' => 'Cruz', 'birth_date' => '2021-01-01']),
             'school_year_id' => $year ?? $this->year->id, 'section_id' => $this->sections[$section] ?? $section, 'enrolled_on' => '2026-06-01', 'status' => $status,
+            'withdrawn_on' => $status === 'withdrawn' ? '2026-06-01' : null,
         ]);
     }
 

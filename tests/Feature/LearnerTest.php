@@ -348,7 +348,7 @@ class LearnerTest extends TestCase
     {
         for ($i = 0; $i < $count; $i++) {
             $learner = Learner::create(['first_name' => "L$i", 'last_name' => $section->name, 'birth_date' => '2021-01-01', 'gender' => 'Female']);
-            $learner->enrollments()->create(['school_year_id' => $this->year->id, 'section_id' => $section->id, 'enrolled_on' => '2026-06-01', 'status' => $status]);
+            $learner->enrollments()->create(['school_year_id' => $this->year->id, 'section_id' => $section->id, 'enrolled_on' => '2026-06-01', 'status' => $status, 'withdrawn_on' => $status === 'withdrawn' ? '2026-06-01' : null]);
         }
     }
 }

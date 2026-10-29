@@ -17,6 +17,17 @@ class StoreLearnerRequest extends FormRequest
 
     private const MAX_GUARDIANS = 10;
 
+    public const AGE_MESSAGE = 'Learner must be between 4 and 6 years old.';
+
+    // Learners must be 4 to 6 years old today in PH time, same as the form. Re-enrollment checks the same window.
+    // Returns [earliest birthdate (exclusive), latest birthdate (inclusive)] as Y-m-d.
+    public static function birthdateBounds(): array
+    {
+        $today = Carbon::now('Asia/Manila')->startOfDay();
+
+        return [$today->copy()->subYears(7)->toDateString(), $today->copy()->subYears(4)->toDateString()];
+    }
+
     // The form groups mobile numbers as "0917 123 4567"; validate and store the digits only.
     protected function prepareForValidation(): void
     {
@@ -31,8 +42,7 @@ class StoreLearnerRequest extends FormRequest
     public function rules(): array
     {
         $year = SchoolYear::active();
-        // Age window is checked against today in PH time, same as the form.
-        $today = Carbon::now('Asia/Manila')->startOfDay();
+        [$earliest, $latest] = self::birthdateBounds();
 
         $rules = [
             'lrn' => ['nullable', 'digits:12', 'unique:learners,lrn'],
@@ -42,8 +52,8 @@ class StoreLearnerRequest extends FormRequest
             'extensionName' => ['nullable', Rule::in(self::EXTENSION_NAMES)],
             'birthdate' => [
                 'required', 'date',
-                'before_or_equal:'.$today->copy()->subYears(4)->toDateString(),
-                'after:'.$today->copy()->subYears(7)->toDateString(),
+                'before_or_equal:'.$latest,
+                'after:'.$earliest,
             ],
             'gender' => ['required', Rule::in(['Male', 'Female'])],
             'houseStreet' => ['required', 'string', 'max:255'],
@@ -81,8 +91,8 @@ class StoreLearnerRequest extends FormRequest
             'firstName.required' => 'First name is required.',
             'lastName.required' => 'Last name is required.',
             'birthdate.required' => 'Birthdate is required.',
-            'birthdate.before_or_equal' => 'Learner must be between 4 and 6 years old.',
-            'birthdate.after' => 'Learner must be between 4 and 6 years old.',
+            'birthdate.before_or_equal' => self::AGE_MESSAGE,
+            'birthdate.after' => self::AGE_MESSAGE,
             'gender.required' => 'Gender is required.',
             'houseStreet.required' => 'House No./Street is required.',
             'barangay.required' => 'Barangay is required.',

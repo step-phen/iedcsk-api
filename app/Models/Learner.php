@@ -63,6 +63,7 @@ class Learner extends Model
             'gradeLevel' => $this->latestEnrollment?->section?->grade_level,
             'section' => $this->latestEnrollment?->section?->name,
             'photoUrl' => $this->avatar_url ? $disk->url($this->avatar_url) : null,
+            'enrollmentStatus' => $this->latestEnrollment?->status,
         ];
     }
 
@@ -76,6 +77,10 @@ class Learner extends Model
             'schoolYear' => $enrollment?->schoolYear?->name,
             // Lets the profile link to this learner's progress report in the right section.
             'sectionId' => $enrollment?->section_id,
+            'withdrawnOn' => $enrollment?->withdrawn_on?->toDateString(),
+            'withdrawalReason' => $enrollment?->withdrawal_reason,
+            // Only this school year's enrollment, while still active, can be withdrawn.
+            'canWithdraw' => $enrollment?->status === 'active' && $enrollment->schoolYear?->status === 'active',
             'address' => $address ? [
                 'addressId' => $address->id,
                 'learnerId' => $this->id,
