@@ -19,7 +19,8 @@ class LearnerSessionController extends Controller
 
     public const VIDEO_MISSING = 'This activity is not yet available. Please wait for your teacher to add the video.';
 
-    // Names on the picker: present or late learners (today's attendance before class, the class roster during it), minus anyone mid-activity.
+    // Names on the picker: present or late learners (today's attendance before class, the class roster during it).
+    // Mid-activity learners stay listed: a device that dies or closes must be able to pick them again, and join resumes their run.
     public function learners(Request $request): JsonResponse
     {
         $session = $this->currentSession($request);
@@ -29,21 +30,11 @@ class LearnerSessionController extends Controller
             return response()->json(['learners' => $learners->map(fn ($l) => $this->pickerRow($l))]);
         }
 
-        $active = ClassSession::activeActivity($session->id);
-        // Mid-activity on another device, unless they already finished this activity in an earlier class (then they are done, not busy).
-        $busy = $active
-            ? DB::table('learner_activity_assignments')->where(['session_activity_id' => $active->session_activity_id, 'status' => 'in_progress'])
-                ->whereNotIn('enrollment_id', DB::table('learner_activity_assignments')
-                    ->where(['activity_id' => $active->activity_id, 'status' => 'completed'])->select('enrollment_id'))
-                ->pluck('enrollment_id')
-            : collect();
-
         $learners = DB::table('classroom_session_learners')
             ->join('learner_school_years', 'learner_school_years.id', '=', 'classroom_session_learners.enrollment_id')
             ->join('learners', 'learners.id', '=', 'learner_school_years.learner_id')
             ->where('classroom_session_learners.classroom_session_id', $session->id)
             ->whereIn('classroom_session_learners.attendance_status', self::PLAYABLE)
-            ->whereNotIn('classroom_session_learners.enrollment_id', $busy)
             ->orderBy('learners.first_name')
             ->get(['learners.id', 'learners.first_name', 'learners.avatar_url']);
 

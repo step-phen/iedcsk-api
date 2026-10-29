@@ -166,7 +166,11 @@ class ClassroomSessionTest extends TestCase
         $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
         $this->assertSame(1, DB::table('learner_activity_attempts')->count());
         $this->getJson("/api/classroom-session?learnerId={$this->kids['Ana']}")->assertJson(['active' => true, 'activityId' => $game, 'activityFormat' => 'digital', 'activityType' => 'tap_choice', 'participantStatus' => 'Started the Activity']);
-        $this->getJson('/api/classroom-session/learners')->assertExactJson(['learners' => []]);
+        // Her device dies mid-game: a fresh device still lists her and resumes the same run, no second attempt.
+        $this->device()->getJson('/api/classroom-session/learners')->assertJsonPath('learners.0.id', $this->kids['Ana']);
+        $this->postJson('/api/classroom-session/claim', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $this->postJson('/api/classroom-session/join', ['learnerId' => $this->kids['Ana']])->assertOk();
+        $this->assertSame(1, DB::table('learner_activity_attempts')->count());
 
         // Graded on the server: first answer per question, decoys and unknown ids ignored.
         $answers = [
